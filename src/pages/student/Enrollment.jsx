@@ -7,35 +7,39 @@ import {
   CheckCircle2,
   XCircle,
   Clock,
-  Image as ImageIcon,
+  ImageIcon,
   CreditCard,
-  Layers,
-  AlertCircle,
   FileText,
-  Trash2
+  Trash2,
+  Users,
+  Copy,
+  Building2,
 } from "lucide-react";
 
 export default function Enrollment() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-
   const [studentId, setStudentId] = useState(null);
   const [classes, setClasses] = useState([]);
   const [payments, setPayments] = useState([]);
 
-  // Form State
   const [selectedClassId, setSelectedClassId] = useState("");
   const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
-
   const fileInputRef = useRef(null);
 
-  // Fetch Data
+  // Informasi Rekening Pembayaran Resmi
+  const BANK_INFO = {
+    bank: "BCA",
+    accountNumber: "7112175957",
+    accountHolder: "Rijal Triana",
+  };
+
   const loadData = async () => {
     setLoading(true);
     try {
       const savedUser = localStorage.getItem("user_session");
-      if (!savedUser) throw new Error("Sesi berakhir. Silakan login kembali.");
+      if (!savedUser) throw new Error("Sesi berakhir. Silakan masuk kembali.");
       const user = JSON.parse(savedUser);
 
       // 1. Dapatkan student_id
@@ -48,11 +52,11 @@ export default function Enrollment() {
       if (studentError || !student) throw new Error("Data atlet tidak ditemukan.");
       setStudentId(student.id);
 
-      // 2. Ambil riwayat pembayaran student ini
+      // 2. Ambil riwayat pembayaran atlet
       const { data: paymentData, error: payError } = await supabase
         .from("payments")
         .select(`
-          id, amount, status, reject_reason, created_at, receipt_url,
+          id, class_id, amount, status, reject_reason, created_at, receipt_url,
           classes ( name )
         `)
         .eq("student_id", student.id)
@@ -61,30 +65,52 @@ export default function Enrollment() {
       if (payError) throw payError;
       setPayments(paymentData || []);
 
-      // 3. Ambil data kelas aktif yang belum diikuti & tidak ada pending payment
-      const { data: enrollments } = await supabase
+      // 3. Ambil pendaftaran kelas yang saat ini SEDANG AKTIF
+      // Catatan: Kelas berstatus 'completed' sengaja TIDAK dikecualikan agar atlet bisa mendaftar ulang
+      const { data: activeEnrollments } = await supabase
         .from("student_enrollments")
         .select("class_id")
         .eq("student_id", student.id)
-        .in("status", ["active", "completed"]);
+        .eq("status", "active");
 
-      const enrolledIds = enrollments?.map((e) => e.class_id) || [];
+      const activeClassIds = activeEnrollments?.map((e) => e.class_id) || [];
+
+      // Kecualikan kelas yang pembayarannya masih menunggu verifikasi admin
       const pendingPayIds = paymentData
         ?.filter((p) => p.status === "pending")
         .map((p) => p.class_id) || [];
 
-      const excludedClassIds = [...enrolledIds, ...pendingPayIds];
+      const excludedClassIds = [...activeClassIds, ...pendingPayIds];
 
-      const { data: classData, error: classError } = await supabase
-        .from("classes")
-        .select("id, name, price, max_capacity");
+      // 4. Ambil data seluruh kelas dan hitung sisa kuota kapasitas
+      const [classRes, allEnrollRes] = await Promise.all([
+        supabase.from("classes").select("id, name, price, max_capacity, max_sessions"),
+        supabase.from("student_enrollments").select("class_id").eq("status", "active"),
+      ]);
 
-      if (classError) throw classError;
+      if (classRes.error) throw classRes.error;
+      if (allEnrollRes.error) throw allEnrollRes.error;
 
-      // Filter kelas yang bisa dipilih
-      const availableClasses = classData.filter(
-        (c) => !excludedClassIds.includes(c.id)
-      );
+      const enrollCountMap = {};
+      (allEnrollRes.data || []).forEach((item) => {
+        enrollCountMap[item.class_id] = (enrollCountMap[item.class_id] || 0) + 1;
+      });
+
+      const availableClasses = (classRes.data || [])
+        .filter((c) => !excludedClassIds.includes(c.id))
+        .map((c) => {
+          const maxCapacity = Number(c.max_capacity) || 20;
+          const enrolledCount = Number(enrollCountMap[c.id]) || 0;
+          const remainingSeats = Math.max(0, maxCapacity - enrolledCount);
+          return {
+            ...c,
+            max_capacity: maxCapacity,
+            enrolled_count: enrolledCount,
+            remaining_seats: remainingSeats,
+            is_full: remainingSeats <= 0,
+          };
+        });
+
       setClasses(availableClasses);
     } catch (error) {
       toast.error(error.message);
@@ -99,19 +125,21 @@ export default function Enrollment() {
 
   const selectedClassDetails = classes.find((c) => c.id === selectedClassId);
 
-  // Handle File Input
+  const handleCopyAccount = () => {
+    navigator.clipboard.writeText(BANK_INFO.accountNumber);
+    toast.success("Nomor rekening BCA berhasil disalin!");
+  };
+
   const handleFileChange = (e) => {
     const selectedFile = e.target.files[0];
     if (!selectedFile) return;
 
-    // Validasi Ukuran (Max 2MB)
     if (selectedFile.size > 2 * 1024 * 1024) {
       toast.error("Ukuran file tidak boleh melebihi 2MB.");
       fileInputRef.current.value = "";
       return;
     }
 
-    // Validasi Tipe (JPEG, PNG)
     const validTypes = ["image/jpeg", "image/png", "image/jpg"];
     if (!validTypes.includes(selectedFile.type)) {
       toast.error("Hanya file JPG dan PNG yang diizinkan.");
@@ -129,17 +157,15 @@ export default function Enrollment() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  // Handle Submit Payment
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!selectedClassId) return toast.error("Silakan pilih kelas.");
-    if (!file) return toast.error("Silakan unggah bukti pembayaran.");
+    if (!selectedClassId) return toast.error("Silakan pilih kelas terlebih dahulu.");
+    if (selectedClassDetails?.is_full) return toast.error("Kelas ini sudah penuh, silakan pilih kelas lain.");
+    if (!file) return toast.error("Silakan unggah bukti transfer pembayaran.");
 
     setSubmitting(true);
-    const loadingToast = toast.loading("Mengirim permintaan pembayaran...");
-
+    const loadingToast = toast.loading("Mengunggah data pembayaran...");
     try {
-      // 1. Upload File ke Supabase Storage (Bucket: images)
       const fileExt = file.name.split(".").pop();
       const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
       const filePath = `receipts/${fileName}`;
@@ -148,16 +174,13 @@ export default function Enrollment() {
         .from("images")
         .upload(filePath, file);
 
-      if (uploadError) throw new Error("Gagal mengunggah gambar bukti.");
+      if (uploadError) throw new Error("Gagal mengunggah gambar bukti transfer.");
 
-      // Ambil Public URL
       const { data: urlData } = supabase.storage
         .from("images")
         .getPublicUrl(filePath);
-
       const receiptUrl = urlData.publicUrl;
 
-      // 2. Insert Data ke Tabel payments
       const { error: insertError } = await supabase.from("payments").insert([
         {
           student_id: studentId,
@@ -170,11 +193,10 @@ export default function Enrollment() {
 
       if (insertError) throw insertError;
 
-      toast.success("Pembayaran dikirim! Menunggu verifikasi admin.", {
+      toast.success("Bukti pembayaran berhasil dikirim! Menunggu verifikasi admin.", {
         id: loadingToast,
       });
 
-      // Reset Form & Reload Data
       setSelectedClassId("");
       clearFile();
       loadData();
@@ -185,7 +207,6 @@ export default function Enrollment() {
     }
   };
 
-  // Helper Formatting
   const formatRupiah = (number) => {
     return new Intl.NumberFormat("id-ID", {
       style: "currency",
@@ -195,20 +216,22 @@ export default function Enrollment() {
   };
 
   const getStatusBadge = (status) => {
-    if (status === "approved")
+    if (status === "approved") {
       return (
-        <span className="flex items-center gap-1.5 px-3 py-1 bg-emerald-100 text-emerald-700 rounded-lg text-[10px] font-black uppercase tracking-wider border border-emerald-200">
+        <span className="flex items-center gap-1.5 px-3 py-1 bg-emerald-600 text-white rounded-lg text-[10px] font-black uppercase tracking-wider border border-emerald-700 shadow-sm">
           <CheckCircle2 size={14} /> Disetujui
         </span>
       );
-    if (status === "rejected")
+    }
+    if (status === "rejected") {
       return (
-        <span className="flex items-center gap-1.5 px-3 py-1 bg-red-100 text-red-700 rounded-lg text-[10px] font-black uppercase tracking-wider border border-red-200">
+        <span className="flex items-center gap-1.5 px-3 py-1 bg-rose-600 text-white rounded-lg text-[10px] font-black uppercase tracking-wider border border-rose-700 shadow-sm">
           <XCircle size={14} /> Ditolak
         </span>
       );
+    }
     return (
-      <span className="flex items-center gap-1.5 px-3 py-1 bg-amber-100 text-amber-700 rounded-lg text-[10px] font-black uppercase tracking-wider border border-amber-200">
+      <span className="flex items-center gap-1.5 px-3 py-1 bg-amber-400 text-amber-950 rounded-lg text-[10px] font-black uppercase tracking-wider border border-amber-500 shadow-sm">
         <Clock size={14} /> Menunggu
       </span>
     );
@@ -216,90 +239,141 @@ export default function Enrollment() {
 
   if (loading && payments.length === 0) {
     return (
-      <div className="min-h-[70vh] flex flex-col items-center justify-center">
-        <div className="w-12 h-12 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-4"></div>
-        <p className="text-slate-500 font-medium animate-pulse">Memuat data...</p>
+      <div className="min-h-[70vh] flex flex-col items-center justify-center font-sans">
+        <div className="w-10 h-10 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-3"></div>
+        <p className="text-slate-500 text-sm font-medium animate-pulse">Memuat data pendaftaran...</p>
       </div>
     );
   }
 
   return (
     <div className="min-h-screen bg-[#f8fafc] p-4 md:p-8 font-sans">
-      <Toaster position="top-right" toastOptions={{ style: { borderRadius: "16px", fontWeight: "500" } }} />
-
-      <div className="max-w-7xl mx-auto mb-8">
+      <Toaster position="top-right" />
+      <div className="max-w-7xl mx-auto mb-6">
         <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight flex items-center gap-3">
-          <CreditCard className="text-blue-600" size={32} />
+          <CreditCard className="text-blue-600" size={28} />
           Pendaftaran Kelas
         </h1>
         <p className="text-slate-500 mt-1 text-sm">
-          Daftar kelas baru dan lacak riwayat pembayaran Anda.
+          Pilih kelas latihan baru atau perpanjang paket latihan yang telah selesai.
         </p>
       </div>
 
       <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* KOLOM KIRI: Form Pendaftaran */}
-        <div className="lg:col-span-1">
-          <div className="bg-white rounded-3xl shadow-xl shadow-blue-900/5 border border-slate-100 p-6 md:p-8">
-            <h2 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-6 flex items-center gap-2">
-              <BookOpen size={18} className="text-blue-600" /> Pendaftaran Baru
-            </h2>
+        {/* Kolom Kiri: Formulir & Rekening */}
+        <div className="lg:col-span-1 space-y-4">
+          {/* Kartu Informasi Rekening Tujuan Transfer */}
+          <div className="bg-gradient-to-br from-blue-700 via-blue-800 to-[#0a192f] rounded-3xl p-5 text-white shadow-xl shadow-blue-900/10 relative overflow-hidden border border-blue-600/30">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-white/10 flex items-center justify-center backdrop-blur-md">
+                  <Building2 size={16} className="text-cyan-300" />
+                </div>
+                <span className="text-xs font-bold uppercase tracking-wider text-blue-100">
+                  Rekening Pembayaran
+                </span>
+              </div>
+              <span className="text-xs font-black tracking-widest bg-white/20 px-2.5 py-0.5 rounded-md border border-white/20">
+                {BANK_INFO.bank}
+              </span>
+            </div>
 
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">
-                  Kelas Tersedia
+            <div className="space-y-1 my-3">
+              <p className="text-[11px] text-blue-200">Nomor Rekening</p>
+              <div className="flex items-center justify-between bg-white/10 px-3.5 py-2.5 rounded-2xl border border-white/10 backdrop-blur-md">
+                <span className="font-mono text-lg font-black tracking-widest text-white">
+                  {BANK_INFO.accountNumber}
+                </span>
+                <button
+                  type="button"
+                  onClick={handleCopyAccount}
+                  className="flex items-center gap-1 bg-cyan-400 hover:bg-cyan-300 text-slate-900 font-bold px-3 py-1.5 rounded-xl text-xs transition-all active:scale-95 shadow-sm"
+                  title="Salin Nomor Rekening"
+                >
+                  <Copy size={13} />
+                  Salin
+                </button>
+              </div>
+            </div>
+
+            <div className="flex justify-between items-center text-xs mt-3 pt-2 border-t border-white/10 text-blue-100">
+              <span className="text-[11px] text-blue-200">Atas Nama:</span>
+              <span className="font-bold text-white text-sm">{BANK_INFO.accountHolder}</span>
+            </div>
+          </div>
+
+          {/* Formulir Pendaftaran */}
+          <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
+            <h2 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-4 flex items-center gap-2">
+              <BookOpen size={16} className="text-blue-600" /> Formulir Pendaftaran
+            </h2>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">
+                  Pilihan Kelas
                 </label>
                 <select
                   value={selectedClassId}
                   onChange={(e) => setSelectedClassId(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all font-medium text-slate-700 cursor-pointer shadow-inner appearance-none"
+                  className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl text-xs sm:text-sm font-medium text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
                 >
                   <option value="">-- Pilih Kelas --</option>
-                  {classes.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
+                  {classes.map((c) => {
+                    const sisa = c.remaining_seats ?? 0;
+                    return (
+                      <option key={c.id} value={c.id} disabled={c.is_full}>
+                        {c.name} {c.is_full ? "(Penuh)" : `(Sisa Kuota: ${sisa})`}
+                      </option>
+                    );
+                  })}
                 </select>
                 {classes.length === 0 && (
-                  <p className="text-xs text-amber-600 mt-1 ml-1 font-medium">
-                    Anda sudah terdaftar atau memiliki permintaan tertunda untuk semua kelas yang tersedia.
+                  <p className="text-xs text-amber-600 mt-2 font-medium">
+                    Semua kelas yang tersedia saat ini sedang aktif Anda ikuti atau masih menunggu verifikasi.
                   </p>
                 )}
               </div>
 
               {selectedClassDetails && (
-                <div className="p-5 bg-blue-50/50 rounded-2xl border border-blue-100 space-y-3 animate-in fade-in zoom-in-95 duration-200">
+                <div className="p-4 bg-blue-50/60 rounded-xl border border-blue-100 space-y-2.5 text-xs">
                   <div className="flex justify-between items-center">
-                    <span className="text-xs font-bold text-slate-500">Harga</span>
-                    <span className="font-black text-blue-700 text-lg">
-                      {formatRupiah(selectedClassDetails.price)}
-                    </span>
+                    <span className="font-semibold text-slate-600">Biaya:</span>
+                    <span className="font-bold text-blue-700 text-sm">{formatRupiah(selectedClassDetails.price)}</span>
                   </div>
-                  <div className="flex justify-between items-center border-t border-blue-100 pt-3">
-                    <span className="text-xs font-bold text-slate-500">Kapasitas</span>
-                    <span className="text-xs font-bold bg-white px-2.5 py-1 rounded-full text-slate-700 border border-slate-100">
-                      Maks {selectedClassDetails.max_capacity} Siswa
+                  <div className="flex justify-between items-center pt-2 border-t border-blue-100">
+                    <span className="font-semibold text-slate-600">Target Pertemuan:</span>
+                    <span className="font-bold text-slate-700">{selectedClassDetails.max_sessions ?? 12} Sesi</span>
+                  </div>
+                  <div className="flex justify-between items-center pt-2 border-t border-blue-100">
+                    <span className="font-semibold text-slate-600 flex items-center gap-1.5">
+                      <Users size={14} className="text-indigo-500" /> Sisa Kuota Kelas:
+                    </span>
+                    <span
+                      className={`font-black px-2 py-0.5 rounded-full text-[11px] ${
+                        (selectedClassDetails.remaining_seats ?? 0) <= 0
+                          ? "bg-rose-100 text-rose-700 border border-rose-200"
+                          : (selectedClassDetails.remaining_seats ?? 0) <= 3
+                          ? "bg-amber-100 text-amber-800 border border-amber-200"
+                          : "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                      }`}
+                    >
+                      {(selectedClassDetails.remaining_seats ?? 0) <= 0
+                        ? "Penuh"
+                        : `${selectedClassDetails.remaining_seats ?? 0} Kursi (${selectedClassDetails.enrolled_count ?? 0}/${selectedClassDetails.max_capacity ?? 0})`}
                     </span>
                   </div>
                 </div>
               )}
 
-              <div className="space-y-2 pt-2">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">
-                  Unggah Bukti Pembayaran
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">
+                  Unggah Bukti Transfer
                 </label>
                 {!previewUrl ? (
-                  <label className="flex flex-col items-center justify-center w-full h-36 border-2 border-dashed border-slate-200 bg-slate-50 rounded-2xl hover:bg-slate-100 hover:border-blue-400 transition-all cursor-pointer group">
-                    <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                      <UploadCloud size={30} className="text-slate-400 group-hover:text-blue-500 mb-3 transition-colors" />
-                      <p className="mb-1 text-sm text-slate-500 font-medium">
-                        <span className="font-bold text-blue-600">Click to upload</span> or drag and drop
-                      </p>
-                      <p className="text-xs text-slate-400">JPG or PNG (MAX. 2MB)</p>
-                    </div>
+                  <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-slate-200 bg-slate-50 rounded-xl hover:bg-slate-100 cursor-pointer">
+                    <UploadCloud size={24} className="text-slate-400 mb-2" />
+                    <p className="text-xs text-slate-600 font-medium">Klik untuk memilih file</p>
+                    <p className="text-[10px] text-slate-400 mt-0.5">JPG atau PNG (Maksimal 2MB)</p>
                     <input
                       type="file"
                       className="hidden"
@@ -309,109 +383,82 @@ export default function Enrollment() {
                     />
                   </label>
                 ) : (
-                  <div className="relative w-full h-48 rounded-2xl overflow-hidden border border-slate-200 shadow-sm group">
-                    <img src={previewUrl} alt="Receipt Preview" className="w-full h-full object-cover" />
-                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                      <button
-                        type="button"
-                        onClick={clearFile}
-                        className="bg-red-500 text-white p-3 rounded-full hover:bg-red-600 transition-transform active:scale-95"
-                        title="Hapus Gambar"
-                      >
-                        <Trash2 size={20} />
-                      </button>
-                    </div>
+                  <div className="relative w-full h-40 rounded-xl overflow-hidden border border-slate-200">
+                    <img src={previewUrl} alt="Pratinjau Bukti" className="w-full h-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={clearFile}
+                      className="absolute top-2 right-2 p-1.5 bg-rose-600 text-white rounded-full shadow-md"
+                    >
+                      <Trash2 size={16} />
+                    </button>
                   </div>
                 )}
               </div>
 
               <button
                 type="submit"
-                disabled={submitting || !selectedClassId || !file}
-                className="w-full py-4 bg-slate-900 hover:bg-black text-white font-bold rounded-2xl shadow-lg transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                disabled={submitting || !selectedClassId || selectedClassDetails?.is_full || !file}
+                className="w-full py-3 bg-slate-900 hover:bg-black text-white font-bold rounded-xl shadow-md transition-all text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {submitting ? (
-                  <>
-                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                    Processing...
-                  </>
-                ) : (
-                  "Submit Payment"
-                )}
+                {submitting ? "Mengirim..." : selectedClassDetails?.is_full ? "Kelas Penuh" : "Kirim Pembayaran"}
               </button>
             </form>
           </div>
         </div>
 
-        {/* KOLOM KANAN: Tabel Riwayat Pembayaran */}
+        {/* Kolom Kanan: Riwayat Pembayaran */}
         <div className="lg:col-span-2">
-          <div className="bg-white rounded-3xl shadow-xl shadow-blue-900/5 border border-slate-100 overflow-hidden flex flex-col h-full min-h-[500px]">
-            <div className="p-6 border-b border-slate-50 flex justify-between items-center bg-white">
-              <h2 className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
-                <FileText size={18} className="text-blue-600" /> Riwayat Pembayaran
-              </h2>
-              <span className="text-xs bg-blue-50 text-blue-600 px-3 py-1 rounded-full font-bold">
-                {payments.length} Records
+          <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
+            <h2 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-4 flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <FileText size={16} className="text-blue-600" /> Riwayat Pembayaran
               </span>
-            </div>
+              <span className="bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full text-[10px] font-bold">
+                {payments.length} Data
+              </span>
+            </h2>
 
-            <div className="overflow-x-auto flex-1 p-2 md:p-6">
-              {payments.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-slate-400 py-10">
-                  <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mb-4">
-                    <FileText size={32} className="text-slate-300" />
-                  </div>
-                  <p className="font-bold text-slate-600 text-lg">No payments yet</p>
-                  <p className="text-sm mt-1 max-w-xs text-center">
-                    Purchase a class from the enrollment form to see your history here.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {payments.map((p) => {
-                    const dateObj = new Date(p.created_at);
-                    const dateStr = dateObj.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-                    const timeStr = dateObj.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
-
-                    return (
-                      <div key={p.id} className="bg-white border border-slate-100 p-5 rounded-2xl shadow-sm hover:shadow-md transition-shadow">
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
-                          <div className="flex items-center gap-4">
-                            <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
-                              <Layers size={20} />
-                            </div>
-                            <div>
-                              <h3 className="font-bold text-slate-800">{p.classes?.name || "Unknown Class"}</h3>
-                              <p className="text-xs text-slate-400 font-medium mt-0.5">{dateStr} • {timeStr}</p>
-                            </div>
-                          </div>
-                          <div className="flex sm:flex-col items-center sm:items-end justify-between w-full sm:w-auto">
-                            <span className="font-black text-slate-800 text-lg">{formatRupiah(p.amount)}</span>
-                            <div className="mt-1">{getStatusBadge(p.status)}</div>
-                          </div>
-                        </div>
-
-                        {/* Expandable Info untuk Reject atau Preview Receipt */}
-                        <div className="pt-4 border-t border-slate-50 flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-                          <a
-                            href={p.receipt_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-xs font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1.5 transition-colors bg-blue-50 px-3 py-1.5 rounded-lg"
-                          >
-                            <ImageIcon size={14} /> View Receipt
-                          </a>
-
-                          {p.status === "rejected" && p.reject_reason && (
-                            <div className="flex items-start gap-2 p-3 bg-red-50 text-red-700 rounded-xl text-xs w-full sm:max-w-sm">
-                              <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
-                              <span className="font-medium">Alasan: {p.reject_reason}</span>
-                            </div>
-                          )}
-                        </div>
+            <div className="space-y-3">
+              {payments.map((p) => {
+                const dateObj = new Date(p.created_at);
+                const dateStr = dateObj.toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
+                return (
+                  <div key={p.id} className="border border-slate-100 rounded-2xl p-4 bg-slate-50/50 space-y-3">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <h3 className="font-bold text-slate-800 text-sm">{p.classes?.name}</h3>
+                        <p className="text-xs text-slate-400 mt-0.5">{dateStr}</p>
                       </div>
-                    );
-                  })}
+                      <div className="text-right">
+                        <div className="font-black text-slate-800 text-sm">{formatRupiah(p.amount)}</div>
+                        <div className="mt-1">{getStatusBadge(p.status)}</div>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-between items-center pt-2 border-t border-slate-200/60 text-xs">
+                      <a
+                        href={p.receipt_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 font-bold flex items-center gap-1 hover:underline"
+                      >
+                        <ImageIcon size={14} /> Lihat Bukti Transfer
+                      </a>
+                      {p.status === "rejected" && p.reject_reason && (
+                        <span className="text-rose-600 font-medium text-[11px]">
+                          Alasan: {p.reject_reason}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {payments.length === 0 && (
+                <div className="text-center py-12 text-slate-400">
+                  <p className="text-sm font-bold text-slate-600">Belum ada riwayat pembayaran</p>
+                  <p className="text-xs mt-1">Daftar ke salah satu kelas untuk memulai latihan.</p>
                 </div>
               )}
             </div>

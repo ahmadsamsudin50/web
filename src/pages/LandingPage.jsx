@@ -43,8 +43,6 @@ export default function LandingPage() {
       behavior: "smooth",
     });
 
-  
-
   return (
     <div className="min-h-screen bg-[#f8fafc] font-sans overflow-x-hidden scroll-smooth relative">
       <Navbar />
@@ -59,13 +57,13 @@ export default function LandingPage() {
 
       <Footer />
 
-      {/* FLOATING BUTTONS */}
+      {/* Tombol Melayang */}
       <div className="fixed bottom-7 right-7 z-[99] flex items-center gap-3">
-        {/* SCROLL TO TOP */}
+        {/* Tombol Kembali ke Atas */}
         {showScrollTop && (
           <button
             onClick={scrollToTop}
-            title="Back to top"
+            title="Kembali ke atas"
             className="relative w-[52px] h-[52px] p-3.5 rounded-2xl flex items-center justify-center
               bg-[#0a192f] text-white
               shadow-[0_8px_32px_rgba(10,25,47,0.45)]
@@ -77,23 +75,19 @@ export default function LandingPage() {
               overflow-hidden
               group"
           >
-            {/* Shimmer */}
             <span className="absolute inset-0 bg-gradient-to-br from-white/10 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 rounded-2xl" />
-
-            {/* Top highlight */}
             <span className="absolute top-0 left-3 right-3 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
-
             <ArrowUp size={20} strokeWidth={2.5} className="relative z-10" />
           </button>
         )}
 
-        {/* WHATSAPP */}
+        {/* Tombol WhatsApp */}
         {waNumber && (
           <a
             href={`https://wa.me/${waNumber}?text=Halo%20Siripbiru%20Swim%20Club,%20saya%20ingin%20tanya%20informasi%20pendaftaran.`}
             target="_blank"
             rel="noreferrer"
-            title="Chat with us on WhatsApp"
+            title="Hubungi kami melalui WhatsApp"
             className="relative flex items-center gap-0 rounded-2xl overflow-hidden
               bg-[#25D366] text-white
               shadow-[0_8px_32px_rgba(37,211,102,0.5)]
@@ -105,18 +99,13 @@ export default function LandingPage() {
               group
               pl-0 pr-0 py-0"
           >
-            {/* Shimmer */}
             <span className="absolute inset-0 bg-gradient-to-br from-white/20 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-
-            {/* Highlight */}
             <span className="absolute top-0 left-3 right-3 h-px bg-gradient-to-r from-transparent via-white/40 to-transparent" />
 
-            {/* Expanding label */}
-            <span className="relative z-10 max-w-0 overflow-hidden group-hover:max-w-[120px] transition-all duration-500 ease-in-out whitespace-nowrap text-sm font-extrabold tracking-wide pl-0 group-hover:pl-4">
-              Chat with us
+            <span className="relative z-10 max-w-0 overflow-hidden group-hover:max-w-[140px] transition-all duration-500 ease-in-out whitespace-nowrap text-sm font-extrabold tracking-wide pl-0 group-hover:pl-4">
+              Hubungi Kami
             </span>
 
-            {/* Icon */}
             <span className="relative z-10 p-3.5 flex items-center justify-center">
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -129,7 +118,6 @@ export default function LandingPage() {
               </svg>
             </span>
 
-            {/* Ping */}
             <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5">
               <span className="absolute inset-0 rounded-full bg-white opacity-75 animate-ping" />
               <span className="absolute inset-0.5 rounded-full bg-white" />

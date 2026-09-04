@@ -30,13 +30,12 @@ function ConfirmModal({
   cancelLabel = "Batal",
 }) {
   if (!isOpen) return null;
-
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center px-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
       <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200">
         <div className="flex flex-col items-center pt-8 pb-4 px-8">
-          <div className="w-16 h-16 rounded-full bg-red-50 flex items-center justify-center mb-4 ring-8 ring-red-50/60">
-            <AlertTriangle size={28} className="text-red-500" strokeWidth={2} />
+          <div className="w-16 h-16 rounded-full bg-rose-50 flex items-center justify-center mb-4 ring-8 ring-rose-50/60">
+            <AlertTriangle size={28} className="text-rose-500" strokeWidth={2} />
           </div>
           <h3 className="text-lg font-extrabold text-slate-900 text-center tracking-tight">
             {title}
@@ -54,7 +53,7 @@ function ConfirmModal({
           </button>
           <button
             onClick={onConfirm}
-            className="flex-1 py-3 px-4 font-bold text-white bg-red-500 hover:bg-red-600 rounded-2xl shadow-lg shadow-red-500/30 transition-all active:scale-95 text-sm"
+            className="flex-1 py-3 px-4 font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-2xl shadow-lg shadow-rose-600/30 transition-all active:scale-95 text-sm"
           >
             {confirmLabel}
           </button>
@@ -71,7 +70,6 @@ const formatForInput = (iso) => {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
 
-// Helper untuk format waktu absensi saja
 const formatTimeOnly = (iso) => {
   if (!iso) return "-";
   return new Date(iso).toLocaleTimeString("id-ID", {
@@ -80,16 +78,17 @@ const formatTimeOnly = (iso) => {
   });
 };
 
-// HELPER UNTUK WARNA STATUS ABSENSI
 const getStatusBadgeStyle = (status) => {
-  if (!status) return "bg-slate-100 text-slate-500 border-slate-200";
+  if (!status || status === "belum_absen") {
+    return "bg-slate-100 text-slate-600 border-slate-300";
+  }
   const s = status.toLowerCase();
-  if (s.includes("hadir_qr")) return "bg-emerald-100 text-emerald-700 border-emerald-200";
-  if (s.includes("hadir_manual")) return "bg-teal-100 text-teal-700 border-teal-200";
-  if (s.includes("izin")) return "bg-blue-100 text-blue-700 border-blue-200";
-  if (s.includes("sakit")) return "bg-amber-100 text-amber-700 border-amber-200";
-  if (s.includes("alpa")) return "bg-rose-100 text-rose-700 border-rose-200";
-  return "bg-slate-100 text-slate-500 border-slate-200"; // Default (Belum absen)
+  if (s.includes("hadir_qr")) return "bg-emerald-500 text-white border-emerald-600 shadow-sm";
+  if (s.includes("hadir_manual")) return "bg-teal-500 text-white border-teal-600 shadow-sm";
+  if (s.includes("izin")) return "bg-blue-500 text-white border-blue-600 shadow-sm";
+  if (s.includes("sakit")) return "bg-amber-400 text-amber-950 border-amber-500 shadow-sm";
+  if (s.includes("alpa")) return "bg-rose-600 text-white border-rose-700 shadow-sm";
+  return "bg-slate-200 text-slate-700 border-slate-300";
 };
 
 export default function SessionManage() {
@@ -97,7 +96,6 @@ export default function SessionManage() {
   const [classes, setClasses] = useState([]);
   const [coaches, setCoaches] = useState([]);
   const [loading, setLoading] = useState(true);
-
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [sortOrder, setSortOrder] = useState("desc");
@@ -116,7 +114,6 @@ export default function SessionManage() {
     coach_ids: [],
   });
 
-  // STATE UNTUK MODAL DETAIL ABSENSI
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [selectedSessionDetail, setSelectedSessionDetail] = useState(null);
   const [sessionDetails, setSessionDetails] = useState({
@@ -134,6 +131,7 @@ export default function SessionManage() {
 
   const openConfirm = ({ title, description, onConfirm }) =>
     setConfirmModal({ isOpen: true, title, description, onConfirm });
+
   const closeConfirm = () =>
     setConfirmModal({
       isOpen: false,
@@ -156,25 +154,56 @@ export default function SessionManage() {
 
   const fetchSessions = async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from("sessions")
-      .select("*")
-      .order("created_at", { ascending: false });
+    try {
+      const [sessionRes, logsRes] = await Promise.all([
+        supabase.from("sessions").select("*").order("created_at", { ascending: false }),
+        supabase.from("attendance_logs").select("session_id, status"),
+      ]);
 
-    if (!error && data) {
+      if (sessionRes.error) throw sessionRes.error;
+
+      const logsData = logsRes.data || [];
+      const sessionMap = {};
+
+      logsData.forEach((log) => {
+        if (!sessionMap[log.session_id]) {
+          sessionMap[log.session_id] = {
+            hadir_qr: 0,
+            hadir_manual: 0,
+            izin: 0,
+            sakit: 0,
+            alpa: 0,
+          };
+        }
+        if (sessionMap[log.session_id][log.status] !== undefined) {
+          sessionMap[log.session_id][log.status] += 1;
+        }
+      });
+
       const now = new Date();
       const twelveHoursMs = 12 * 60 * 60 * 1000;
       const expiredIds = [];
 
-      const updatedData = data.map((s) => {
-        if (s.is_active) {
+      const updatedData = (sessionRes.data || []).map((s) => {
+        let activeState = s.is_active;
+        if (activeState) {
           const sessionTime = new Date(s.session_date);
           if (now.getTime() - sessionTime.getTime() > twelveHoursMs) {
             expiredIds.push(s.id);
-            return { ...s, is_active: false };
+            activeState = false;
           }
         }
-        return s;
+        return {
+          ...s,
+          is_active: activeState,
+          status_counts: sessionMap[s.id] || {
+            hadir_qr: 0,
+            hadir_manual: 0,
+            izin: 0,
+            sakit: 0,
+            alpa: 0,
+          },
+        };
       });
 
       if (expiredIds.length > 0) {
@@ -184,9 +213,13 @@ export default function SessionManage() {
           .in("id", expiredIds)
           .then();
       }
+
       setSessions(updatedData);
+    } catch (err) {
+      toast.error("Gagal memuat data sesi: " + err.message);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   useEffect(() => {
@@ -215,7 +248,6 @@ export default function SessionManage() {
       const matchTo = dateTo
         ? new Date(s.session_date) <= new Date(dateTo + "T23:59:59")
         : true;
-
       return matchSearch && matchStatus && matchFrom && matchTo;
     })
     .sort((a, b) => {
@@ -232,6 +264,7 @@ export default function SessionManage() {
 
   const hasActiveFilters =
     searchQuery || filterStatus !== "all" || dateFrom || dateTo;
+
   const clearFilters = () => {
     setSearchQuery("");
     setFilterStatus("all");
@@ -267,36 +300,31 @@ export default function SessionManage() {
     setSelectedSessionDetail(s);
     setIsDetailModalOpen(true);
     setDetailLoading(true);
-
     try {
       const { data: logs } = await supabase
         .from("attendance_logs")
-        .select("student_id, coach_id, status, scanned_at")
+        .select("student_id, coach_id, status, scanned_at, enrollment_id")
         .eq("session_id", s.id);
 
       let expectedStudents = [];
       if (s.class_ids && s.class_ids.length > 0) {
-        // PERBAIKAN: Ambil dari enrollments yang aktif pada kelas-kelas di sesi ini
+        // Ambil atlet yang pendaftarannya berstatus 'active' pada kelas-kelas sesi ini
         const { data: enrollData } = await supabase
           .from("student_enrollments")
-          .select("student_id, classes(name), students(id, nis, users(full_name))")
+          .select("id, student_id, class_id, classes(name, max_sessions), students(id, nis, users(full_name))")
           .in("class_id", s.class_ids)
           .eq("status", "active");
 
         if (enrollData) {
-          // Gunakan Map untuk mencegah duplikasi (jika siswa ikut >1 kelas yg sama-sama ada di sesi ini)
-          const uniqueMap = new Map();
-          enrollData.forEach((e) => {
-            if (e.students && !uniqueMap.has(e.students.id)) {
-              uniqueMap.set(e.students.id, {
-                id: e.students.id,
-                nis: e.students.nis,
-                users: e.students.users,
-                classes: e.classes, // Bawa nama kelas dari tabel kelas
-              });
-            }
-          });
-          expectedStudents = Array.from(uniqueMap.values());
+          expectedStudents = enrollData
+            .filter((e) => e.students)
+            .map((e) => ({
+              id: e.students.id,
+              enrollment_id: e.id,
+              nis: e.students.nis,
+              users: e.students.users,
+              classes: e.classes,
+            }));
         }
       }
 
@@ -313,21 +341,31 @@ export default function SessionManage() {
       const logMapCoach = {};
 
       logs?.forEach((log) => {
-        if (log.student_id) logMapStudent[log.student_id] = { status: log.status, time: log.scanned_at }; 
-        if (log.coach_id) logMapCoach[log.coach_id] = { status: log.status, time: log.scanned_at };
+        if (log.student_id) {
+          logMapStudent[log.student_id] = {
+            status: log.status,
+            time: log.scanned_at,
+          };
+        }
+        if (log.coach_id) {
+          logMapCoach[log.coach_id] = {
+            status: log.status,
+            time: log.scanned_at,
+          };
+        }
       });
 
       const mappedStudents = expectedStudents.map((std) => ({
         ...std,
-        status: logMapStudent[std.id]?.status || "belum absen",
-        scanned_at: logMapStudent[std.id]?.time || null, 
+        status: logMapStudent[std.id]?.status || "belum_absen",
+        scanned_at: logMapStudent[std.id]?.time || null,
         is_present: !!logMapStudent[std.id],
       }));
 
       const mappedCoaches = expectedCoaches.map((c) => ({
         ...c,
-        status: logMapCoach[c.id]?.status || "belum absen",
-        scanned_at: logMapCoach[c.id]?.time || null, 
+        status: logMapCoach[c.id]?.status || "belum_absen",
+        scanned_at: logMapCoach[c.id]?.time || null,
         is_present: !!logMapCoach[c.id],
       }));
 
@@ -343,7 +381,7 @@ export default function SessionManage() {
         coaches: mappedCoaches,
       });
     } catch (error) {
-      toast.error("Failed to load attendance details.");
+      toast.error("Gagal memuat rincian kehadiran: " + error.message);
     } finally {
       setDetailLoading(false);
     }
@@ -352,25 +390,27 @@ export default function SessionManage() {
   const toggleCheckbox = (type, id) => {
     setForm((prev) => {
       const list = prev[type];
-      if (list.includes(id))
+      if (list.includes(id)) {
         return { ...prev, [type]: list.filter((item) => item !== id) };
+      }
       return { ...prev, [type]: [...list, id] };
     });
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (form.class_ids.length === 0)
-      return toast.error("Select at least one class.");
-    if (form.coach_ids.length === 0)
-      return toast.error("Select at least one coach.");
+    if (form.class_ids.length === 0) {
+      return toast.error("Pilih minimal satu kelas.");
+    }
+    if (form.coach_ids.length === 0) {
+      return toast.error("Pilih minimal satu pelatih.");
+    }
 
     const loadingToast = toast.loading(
-      isEditing ? "Updating session..." : "Creating new session...",
+      isEditing ? "Memperbarui sesi..." : "Membuat sesi baru...",
     );
-
     const payload = {
-      name: form.name,
+      name: form.name.trim(),
       session_date: new Date(form.session_date).toISOString(),
       class_ids: form.class_ids,
       coach_ids: form.coach_ids,
@@ -383,22 +423,24 @@ export default function SessionManage() {
         .eq("id", currentId);
 
       if (!error) {
-        toast.success("Session updated successfully", { id: loadingToast });
+        toast.success("Sesi berhasil diperbarui", { id: loadingToast });
         setIsModalOpen(false);
         fetchSessions();
-      } else
-        toast.error(`Update failed: ${error.message}`, { id: loadingToast });
+      } else {
+        toast.error(`Pembaruan gagal: ${error.message}`, { id: loadingToast });
+      }
     } else {
       const { error } = await supabase
         .from("sessions")
         .insert([{ ...payload, is_active: true }]);
 
       if (!error) {
-        toast.success("Session created successfully", { id: loadingToast });
+        toast.success("Sesi baru berhasil dibuat", { id: loadingToast });
         setIsModalOpen(false);
         fetchSessions();
-      } else
-        toast.error(`Creation failed: ${error.message}`, { id: loadingToast });
+      } else {
+        toast.error(`Pembuatan gagal: ${error.message}`, { id: loadingToast });
+      }
     }
   };
 
@@ -406,27 +448,29 @@ export default function SessionManage() {
     openConfirm({
       title: "Hapus Sesi Ini?",
       description:
-        "Tindakan ini bersifat permanen. Semua catatan kehadiran yang terkait dengan sesi ini juga akan dihapus.",
+        "Tindakan ini bersifat permanen. Semua catatan presensi yang terhubung ke sesi ini akan ikut terhapus.",
       onConfirm: async () => {
         closeConfirm();
-        const loadingToast = toast.loading("Deleting session...");
+        const loadingToast = toast.loading("Menghapus sesi...");
         const { error } = await supabase.from("sessions").delete().eq("id", id);
         if (!error) {
           toast.success("Sesi berhasil dihapus", { id: loadingToast });
-          if (paginatedSessions.length === 1 && currentPage > 1)
+          if (paginatedSessions.length === 1 && currentPage > 1) {
             setCurrentPage((p) => p - 1);
+          }
           fetchSessions();
-        } else
+        } else {
           toast.error(`Gagal menghapus: ${error.message}`, {
             id: loadingToast,
           });
+        }
       },
     });
   };
 
   const toggleStatus = async (id, currentStatus) => {
     const loadingToast = toast.loading(
-      currentStatus ? "Closing session..." : "Activating session...",
+      currentStatus ? "Menutup gerbang sesi..." : "Membuka gerbang sesi...",
     );
     const { error } = await supabase
       .from("sessions")
@@ -438,10 +482,19 @@ export default function SessionManage() {
         id: loadingToast,
       });
       fetchSessions();
-    } else
-      toast.error(`Status update failed: ${error.message}`, {
+    } else {
+      toast.error(`Pembaruan status gagal: ${error.message}`, {
         id: loadingToast,
       });
+    }
+  };
+
+  const modalStudentCounts = {
+    hadir: sessionDetails.students.filter((s) => s.status.includes("hadir")).length,
+    izin: sessionDetails.students.filter((s) => s.status === "izin").length,
+    sakit: sessionDetails.students.filter((s) => s.status === "sakit").length,
+    alpa: sessionDetails.students.filter((s) => s.status === "alpa").length,
+    belum_absen: sessionDetails.students.filter((s) => s.status === "belum_absen").length,
   };
 
   return (
@@ -450,7 +503,6 @@ export default function SessionManage() {
         position="top-right"
         toastOptions={{ style: { borderRadius: "16px", fontWeight: "500" } }}
       />
-
       <ConfirmModal
         isOpen={confirmModal.isOpen}
         title={confirmModal.title}
@@ -459,14 +511,13 @@ export default function SessionManage() {
         onCancel={closeConfirm}
       />
 
-      {/* Header */}
       <div className="max-w-7xl mx-auto mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">
             Sesi Latihan
           </h1>
           <p className="text-slate-500 mt-1 text-sm">
-            Kelola jadwal latihan renang harian dan gerbang kehadiran.
+            Kelola jadwal latihan renang harian, ringkasan kehadiran, dan gerbang absensi.
           </p>
         </div>
         <button
@@ -477,7 +528,6 @@ export default function SessionManage() {
         </button>
       </div>
 
-      {/* Controls Card */}
       <div className="max-w-7xl mx-auto mb-6 bg-white rounded-3xl border border-slate-100 shadow-sm p-4 flex flex-col gap-3">
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1">
@@ -486,12 +536,13 @@ export default function SessionManage() {
             </div>
             <input
               type="text"
-              placeholder="Search session by name..."
+              placeholder="Cari nama sesi latihan..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all"
+              className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all font-medium"
             />
           </div>
+
           <div className="relative flex-shrink-0 sm:w-48">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
               <Filter size={15} className="text-slate-400" />
@@ -499,22 +550,21 @@ export default function SessionManage() {
             <select
               value={filterStatus}
               onChange={(e) => setFilterStatus(e.target.value)}
-              className="w-full pl-9 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all appearance-none cursor-pointer font-medium text-slate-600"
+              className="w-full pl-9 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all cursor-pointer font-medium text-slate-600"
             >
               <option value="all">Semua Status</option>
               <option value="active">Sesi Aktif</option>
               <option value="closed">Sesi Ditutup</option>
             </select>
           </div>
+
           <button
             onClick={() => setSortOrder((p) => (p === "desc" ? "asc" : "desc"))}
             className="flex items-center justify-center gap-2 bg-slate-50 border border-slate-200 hover:bg-slate-100 text-slate-600 font-bold py-3 px-4 rounded-2xl transition-all text-sm flex-shrink-0"
           >
             <ArrowUpDown
               size={15}
-              className={
-                sortOrder === "desc" ? "text-blue-600" : "text-slate-400"
-              }
+              className={sortOrder === "desc" ? "text-blue-600" : "text-slate-400"}
             />
             {sortOrder === "desc" ? "Terbaru" : "Tertua"}
           </button>
@@ -543,7 +593,7 @@ export default function SessionManage() {
           {hasActiveFilters && (
             <button
               onClick={clearFilters}
-              className="flex items-center justify-center gap-1.5 bg-red-50 border border-red-200 hover:bg-red-100 text-red-500 font-bold py-3 px-4 rounded-2xl transition-all text-sm flex-shrink-0"
+              className="flex items-center justify-center gap-1.5 bg-rose-50 border border-rose-200 hover:bg-rose-100 text-rose-600 font-bold py-3 px-4 rounded-2xl transition-all text-sm flex-shrink-0"
             >
               <X size={15} /> Bersihkan
             </button>
@@ -551,7 +601,6 @@ export default function SessionManage() {
         </div>
       </div>
 
-      {/* Table */}
       <div className="max-w-7xl mx-auto bg-white rounded-3xl shadow-xl shadow-blue-900/5 border border-slate-100 overflow-hidden flex flex-col min-h-[500px]">
         <div className="p-6 border-b border-slate-50 flex justify-between items-center bg-white">
           <h2 className="font-bold text-slate-800">Catatan Sesi</h2>
@@ -560,58 +609,86 @@ export default function SessionManage() {
           </span>
         </div>
         <div className="overflow-x-auto flex-1">
-          <table className="w-full text-left border-collapse min-w-[600px]">
+          <table className="w-full text-left border-collapse min-w-[850px]">
             <thead>
               <tr className="bg-slate-50/50 text-slate-400 text-[11px] uppercase tracking-widest font-black">
-                <th className="px-6 py-4">Detail Sesi</th>
+                <th className="px-6 py-4">Rincian Sesi</th>
+                <th className="px-6 py-4">Jumlah Kehadiran Per Status</th>
                 <th className="px-6 py-4">Status Gerbang</th>
-                <th className="px-6 py-4 text-right">Actions</th>
+                <th className="px-6 py-4 text-right">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
               {paginatedSessions.map((s) => {
                 const dateObj = new Date(s.session_date);
-                const timeStr = dateObj.toLocaleTimeString("en-US", {
+                const timeStr = dateObj.toLocaleTimeString("id-ID", {
                   hour: "2-digit",
                   minute: "2-digit",
                 });
-                const dateStr = dateObj.toLocaleDateString("en-US", {
+                const dateStr = dateObj.toLocaleDateString("id-ID", {
                   weekday: "long",
                   year: "numeric",
                   month: "long",
                   day: "numeric",
                 });
+                const counts = s.status_counts || {
+                  hadir_qr: 0,
+                  hadir_manual: 0,
+                  izin: 0,
+                  sakit: 0,
+                  alpa: 0,
+                };
+                const totalHadir = (counts.hadir_qr || 0) + (counts.hadir_manual || 0);
 
                 return (
-                  <tr
-                    key={s.id}
-                    className="hover:bg-blue-50/30 transition-colors group"
-                  >
+                  <tr key={s.id} className="hover:bg-blue-50/30 transition-colors group">
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-4">
                         <div
-                          className={`w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 transition-colors ${s.is_active ? "bg-emerald-50 text-emerald-600 group-hover:bg-emerald-100" : "bg-rose-50 text-rose-500 group-hover:bg-rose-100"}`}
+                          className={`w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 transition-colors ${
+                            s.is_active
+                              ? "bg-emerald-50 text-emerald-600 group-hover:bg-emerald-100"
+                              : "bg-rose-50 text-rose-500 group-hover:bg-rose-100"
+                          }`}
                         >
                           <CalendarDays size={20} />
                         </div>
                         <div>
                           <div
-                            className={`font-bold text-base ${s.is_active ? "text-slate-800" : "text-slate-500"}`}
+                            className={`font-bold text-base ${
+                              s.is_active ? "text-slate-800" : "text-slate-500"
+                            }`}
                           >
                             {s.name}
                           </div>
                           <div className="text-xs text-slate-400 mt-0.5 font-medium flex items-center gap-1.5">
-                            <Clock size={12} /> {timeStr} • {dateStr}
+                            <Clock size={12} /> {timeStr} WIB • {dateStr}
                           </div>
                           <div className="flex gap-2 mt-1.5">
                             <span className="text-[10px] font-bold px-2 py-0.5 bg-blue-50 text-blue-600 rounded">
-                              {s.class_ids?.length || 0} Classes
+                              {s.class_ids?.length || 0} Kelas
                             </span>
                             <span className="text-[10px] font-bold px-2 py-0.5 bg-indigo-50 text-indigo-600 rounded">
-                              {s.coach_ids?.length || 0} Coaches
+                              {s.coach_ids?.length || 0} Pelatih
                             </span>
                           </div>
                         </div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                          Hadir: {totalHadir}
+                        </span>
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-extrabold bg-blue-100 text-blue-800 border border-blue-300">
+                          Izin: {counts.izin || 0}
+                        </span>
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-extrabold bg-amber-100 text-amber-900 border border-amber-300">
+                          Sakit: {counts.sakit || 0}
+                        </span>
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-extrabold bg-rose-100 text-rose-800 border border-rose-300">
+                          Alpa: {counts.alpa || 0}
+                        </span>
                       </div>
                     </td>
                     <td className="px-6 py-4">
@@ -619,8 +696,8 @@ export default function SessionManage() {
                         onClick={() => toggleStatus(s.id, s.is_active)}
                         className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold transition-all border ${
                           s.is_active
-                             ? "bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-rose-500 hover:text-white hover:border-rose-500"
-                             : "bg-rose-50 text-rose-600 border-rose-200 hover:bg-emerald-500 hover:text-white hover:border-emerald-500"
+                            ? "bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-rose-500 hover:text-white hover:border-rose-500"
+                            : "bg-rose-50 text-rose-600 border-rose-200 hover:bg-emerald-500 hover:text-white hover:border-emerald-500"
                         }`}
                       >
                         <Power size={12} />
@@ -629,24 +706,24 @@ export default function SessionManage() {
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex justify-end gap-2">
-                        {/* TOMBOL EYE UNTUK LIHAT DETAIL */}
                         <button
                           onClick={() => openDetailModal(s)}
                           className="p-2.5 text-indigo-600 bg-indigo-50 hover:bg-indigo-600 hover:text-white rounded-xl transition-all shadow-sm"
-                          title="View Attendance Details"
+                          title="Lihat Rincian Kehadiran"
                         >
                           <Eye size={16} />
                         </button>
-
                         <button
                           onClick={() => openEditModal(s)}
                           className="p-2.5 text-blue-600 bg-blue-50 hover:bg-blue-600 hover:text-white rounded-xl transition-all shadow-sm"
+                          title="Ubah Sesi"
                         >
                           <Edit2 size={16} />
                         </button>
                         <button
                           onClick={() => handleDelete(s.id)}
-                          className="p-2.5 text-red-600 bg-red-50 hover:bg-red-600 hover:text-white rounded-xl transition-all shadow-sm"
+                          className="p-2.5 text-rose-600 bg-rose-50 hover:bg-rose-600 hover:text-white rounded-xl transition-all shadow-sm"
+                          title="Hapus Sesi"
                         >
                           <Trash2 size={16} />
                         </button>
@@ -655,19 +732,13 @@ export default function SessionManage() {
                   </tr>
                 );
               })}
-
               {paginatedSessions.length === 0 && !loading && (
                 <tr>
-                  <td
-                    colSpan="3"
-                    className="px-6 py-20 text-center text-slate-400"
-                  >
+                  <td colSpan="4" className="px-6 py-20 text-center text-slate-400">
                     <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
                       <Search size={32} className="text-slate-300" />
                     </div>
-                    <p className="font-bold text-slate-600">
-                      Tidak ada sesi yang ditemukan
-                    </p>
+                    <p className="font-bold text-slate-600">Tidak ada sesi yang ditemukan</p>
                     <p className="text-sm mt-1">
                       {hasActiveFilters
                         ? "Coba sesuaikan pencarian, filter, atau rentang tanggal Anda."
@@ -679,12 +750,10 @@ export default function SessionManage() {
             </tbody>
           </table>
         </div>
-
         {totalPages > 0 && (
           <div className="p-4 border-t border-slate-50 flex items-center justify-between bg-slate-50/50">
             <span className="text-xs font-medium text-slate-500 pl-2">
-              Page{" "}
-              <span className="font-bold text-slate-800">{currentPage}</span> of{" "}
+              Halaman <span className="font-bold text-slate-800">{currentPage}</span> dari{" "}
               <span className="font-bold text-slate-800">{totalPages}</span>
             </span>
             <div className="flex gap-2">
@@ -696,9 +765,7 @@ export default function SessionManage() {
                 <ChevronLeft size={16} />
               </button>
               <button
-                onClick={() =>
-                  setCurrentPage((p) => Math.min(totalPages, p + 1))
-                }
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
                 disabled={currentPage === totalPages}
                 className="p-2 rounded-lg bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
               >
@@ -709,7 +776,7 @@ export default function SessionManage() {
         )}
       </div>
 
-      {/* MODAL DETAIL ABSENSI */}
+      {/* Modal Detail Presensi */}
       {isDetailModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-8 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-full animate-in zoom-in-95 duration-200">
@@ -717,56 +784,60 @@ export default function SessionManage() {
               <div className="flex items-center gap-3 text-indigo-600">
                 <Eye size={24} />
                 <h3 className="text-xl font-bold tracking-tight text-slate-800">
-                  Info Kehadiran: {selectedSessionDetail?.name}
+                  Data Kehadiran: {selectedSessionDetail?.name}
                 </h3>
               </div>
               <button
                 onClick={() => setIsDetailModalOpen(false)}
-                className="p-2 bg-white rounded-full text-slate-400 hover:bg-red-50 hover:text-red-500 shadow-sm border border-slate-100 transition-all"
+                className="p-2 bg-white rounded-full text-slate-400 hover:bg-rose-50 hover:text-rose-500 shadow-sm border border-slate-100 transition-all"
               >
                 <X size={20} />
               </button>
             </div>
-
             <div className="p-8 overflow-y-auto custom-scrollbar flex-1 bg-slate-50/50">
               {detailLoading ? (
                 <div className="flex flex-col justify-center items-center h-40">
                   <div className="w-10 h-10 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-4"></div>
-                  <p className="text-slate-500 font-medium">
-                    Memuat data absensi...
-                  </p>
+                  <p className="text-slate-500 font-medium">Memuat data absensi...</p>
                 </div>
               ) : (
                 <div className="space-y-8">
-                  {/* Tabel Atlet */}
                   <div>
-                    <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wider mb-4 flex items-center gap-2">
-                      <Users size={16} className="text-blue-500" /> Attendance Athlete
-                    </h4>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+                      <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
+                        <Users size={16} className="text-blue-500" /> Presensi Atlet
+                      </h4>
+                      <div className="flex flex-wrap gap-1.5 text-[11px]">
+                        <span className="px-2 py-0.5 rounded font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                          Hadir: {modalStudentCounts.hadir}
+                        </span>
+                        <span className="px-2 py-0.5 rounded font-extrabold bg-blue-100 text-blue-800 border border-blue-300">
+                          Izin: {modalStudentCounts.izin}
+                        </span>
+                        <span className="px-2 py-0.5 rounded font-extrabold bg-amber-100 text-amber-900 border border-amber-300">
+                          Sakit: {modalStudentCounts.sakit}
+                        </span>
+                        <span className="px-2 py-0.5 rounded font-extrabold bg-rose-100 text-rose-800 border border-rose-300">
+                          Alpa: {modalStudentCounts.alpa}
+                        </span>
+                        <span className="px-2 py-0.5 rounded font-extrabold bg-slate-200 text-slate-700 border border-slate-300">
+                          Belum Absen: {modalStudentCounts.belum_absen}
+                        </span>
+                      </div>
+                    </div>
                     <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
                       <table className="w-full text-left text-sm">
                         <thead className="bg-slate-50 border-b border-slate-100">
                           <tr>
-                            <th className="px-4 py-3 font-bold text-slate-500">
-                              Name
-                            </th>
-                            <th className="px-4 py-3 font-bold text-slate-500">
-                              Class
-                            </th>
-                            <th className="px-4 py-3 font-bold text-slate-500 text-center">
-                              Time
-                            </th>
-                            <th className="px-4 py-3 font-bold text-slate-500 text-right">
-                              Status
-                            </th>
+                            <th className="px-4 py-3 font-bold text-slate-500">Nama Atlet</th>
+                            <th className="px-4 py-3 font-bold text-slate-500">Kelas</th>
+                            <th className="px-4 py-3 font-bold text-slate-500 text-center">Waktu</th>
+                            <th className="px-4 py-3 font-bold text-slate-500 text-right">Status</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {sessionDetails.students.map((std) => (
-                            <tr
-                              key={std.id}
-                              className="hover:bg-slate-50 transition-colors"
-                            >
+                          {sessionDetails.students.map((std, idx) => (
+                            <tr key={idx} className="hover:bg-slate-50 transition-colors">
                               <td className="px-4 py-3 font-medium text-slate-800">
                                 {std.users?.full_name}
                                 <div className="text-xs text-slate-400 font-mono mt-0.5">
@@ -780,20 +851,23 @@ export default function SessionManage() {
                                 {formatTimeOnly(std.scanned_at)}
                               </td>
                               <td className="px-4 py-3 text-right">
-                                <span className={`inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border ${getStatusBadgeStyle(std.status)}`}>
+                                <span
+                                  className={`inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border ${getStatusBadgeStyle(
+                                    std.status,
+                                  )}`}
+                                >
                                   {std.status.replace("_", " ")}
                                 </span>
                               </td>
                             </tr>
                           ))}
-
                           {sessionDetails.students.length === 0 && (
                             <tr>
                               <td
                                 colSpan="4"
                                 className="px-4 py-8 text-center text-slate-400 font-medium"
                               >
-                                Tidak ada atlet yang ditugaskan ke sesi ini.
+                                Tidak ada atlet aktif yang terdaftar di kelas sesi ini.
                               </td>
                             </tr>
                           )}
@@ -802,33 +876,22 @@ export default function SessionManage() {
                     </div>
                   </div>
 
-                  {/* Tabel Pelatih */}
                   <div>
                     <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wider mb-4 flex items-center gap-2">
-                      <UserCheck size={16} className="text-indigo-500" />{" "}
-                      Attendance Coach
+                      <UserCheck size={16} className="text-indigo-500" /> Presensi Pelatih
                     </h4>
                     <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
                       <table className="w-full text-left text-sm">
                         <thead className="bg-slate-50 border-b border-slate-100">
                           <tr>
-                            <th className="px-4 py-3 font-bold text-slate-500">
-                              Coach
-                            </th>
-                            <th className="px-4 py-3 font-bold text-slate-500 text-center">
-                              Time
-                            </th>
-                            <th className="px-4 py-3 font-bold text-slate-500 text-right">
-                              Status
-                            </th>
+                            <th className="px-4 py-3 font-bold text-slate-500">Nama Pelatih</th>
+                            <th className="px-4 py-3 font-bold text-slate-500 text-center">Waktu</th>
+                            <th className="px-4 py-3 font-bold text-slate-500 text-right">Status</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                           {sessionDetails.coaches.map((coach) => (
-                            <tr
-                              key={coach.id}
-                              className="hover:bg-slate-50 transition-colors"
-                            >
+                            <tr key={coach.id} className="hover:bg-slate-50 transition-colors">
                               <td className="px-4 py-3 font-medium text-slate-800">
                                 {coach.users?.full_name}
                               </td>
@@ -836,13 +899,16 @@ export default function SessionManage() {
                                 {formatTimeOnly(coach.scanned_at)}
                               </td>
                               <td className="px-4 py-3 text-right">
-                                <span className={`inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border ${getStatusBadgeStyle(coach.status)}`}>
+                                <span
+                                  className={`inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border ${getStatusBadgeStyle(
+                                    coach.status,
+                                  )}`}
+                                >
                                   {coach.status.replace("_", " ")}
                                 </span>
                               </td>
                             </tr>
                           ))}
-
                           {sessionDetails.coaches.length === 0 && (
                             <tr>
                               <td
@@ -860,7 +926,6 @@ export default function SessionManage() {
                 </div>
               )}
             </div>
-
             <div className="p-6 border-t border-slate-100 flex items-center justify-end bg-white flex-shrink-0">
               <button
                 onClick={() => setIsDetailModalOpen(false)}
@@ -873,7 +938,7 @@ export default function SessionManage() {
         </div>
       )}
 
-      {/* Form Modal Add/Edit */}
+      {/* Modal Tambah / Edit Sesi */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-8 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-full animate-in zoom-in-95 duration-200">
@@ -881,21 +946,17 @@ export default function SessionManage() {
               <div className="flex items-center gap-3 text-blue-600">
                 {isEditing ? <Edit2 size={24} /> : <CalendarDays size={24} />}
                 <h3 className="text-xl font-bold tracking-tight text-slate-800">
-                  {isEditing ? "Edit Sesi" : "Sesi Baru"}
+                  {isEditing ? "Ubah Sesi" : "Sesi Baru"}
                 </h3>
               </div>
               <button
                 onClick={() => setIsModalOpen(false)}
-                className="p-2 bg-white rounded-full text-slate-400 hover:bg-red-50 hover:text-red-500 shadow-sm border border-slate-100 transition-all"
+                className="p-2 bg-white rounded-full text-slate-400 hover:bg-rose-50 hover:text-rose-500 shadow-sm border border-slate-100 transition-all"
               >
                 <X size={20} />
               </button>
             </div>
-
-            <form
-              onSubmit={handleSubmit}
-              className="flex flex-col overflow-hidden flex-1"
-            >
+            <form onSubmit={handleSubmit} className="flex flex-col overflow-hidden flex-1">
               <div className="p-8 overflow-y-auto space-y-6">
                 <div className="space-y-4">
                   <div className="space-y-1.5">
@@ -905,25 +966,21 @@ export default function SessionManage() {
                     <input
                       required
                       autoFocus
-                      placeholder="e.g. Morning Swim Practice"
+                      placeholder="Contoh: Latihan Pagi Sprint"
                       value={form.name}
-                      onChange={(e) =>
-                        setForm({ ...form, name: e.target.value })
-                      }
+                      onChange={(e) => setForm({ ...form, name: e.target.value })}
                       className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-4 text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all shadow-inner font-medium text-slate-700"
                     />
                   </div>
                   <div className="space-y-1.5">
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">
-                      Date & Time
+                      Tanggal & Waktu
                     </label>
                     <input
                       type="datetime-local"
                       required
                       value={form.session_date}
-                      onChange={(e) =>
-                        setForm({ ...form, session_date: e.target.value })
-                      }
+                      onChange={(e) => setForm({ ...form, session_date: e.target.value })}
                       className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-4 text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all shadow-inner font-medium text-slate-700 cursor-pointer"
                     />
                   </div>
@@ -934,8 +991,7 @@ export default function SessionManage() {
                 <div className="space-y-6">
                   <div className="space-y-3">
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                      <Users size={14} className="text-blue-500" /> Target
-                      Classes
+                      <Users size={14} className="text-blue-500" /> Kelas yang Ditugaskan
                     </label>
                     <div className="grid grid-cols-2 gap-3 p-4 border border-slate-100 bg-slate-50 rounded-2xl">
                       {classes.map((c) => (
@@ -954,7 +1010,7 @@ export default function SessionManage() {
                       ))}
                       {classes.length === 0 && (
                         <span className="text-xs text-slate-400 col-span-2">
-                          No classes available.
+                          Tidak ada kelas yang tersedia.
                         </span>
                       )}
                     </div>
@@ -962,8 +1018,7 @@ export default function SessionManage() {
 
                   <div className="space-y-3">
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                      <UserCheck size={14} className="text-indigo-500" />{" "}
-                      Assigned Coaches
+                      <UserCheck size={14} className="text-indigo-500" /> Pelatih yang Ditugaskan
                     </label>
                     <div className="grid grid-cols-1 gap-3 p-4 border border-slate-100 bg-slate-50 rounded-2xl">
                       {coaches.map((c) => (
@@ -982,7 +1037,7 @@ export default function SessionManage() {
                       ))}
                       {coaches.length === 0 && (
                         <span className="text-xs text-slate-400">
-                          No coaches available.
+                          Tidak ada pelatih yang tersedia.
                         </span>
                       )}
                     </div>

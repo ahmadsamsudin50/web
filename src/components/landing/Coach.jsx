@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useRef } from "react";
 import { supabase } from "../../utils/supabaseClient";
+import { ChevronLeft, ChevronRight, Award, User, MapPin } from "lucide-react";
 
 // ===== ICON COMPONENTS =====
-const InstagramIcon = ({ size = 16 }) => (
+const InstagramIcon = ({ size = 15 }) => (
   <svg
     width={size}
     height={size}
@@ -19,7 +20,7 @@ const InstagramIcon = ({ size = 16 }) => (
   </svg>
 );
 
-const TwitterIcon = ({ size = 16 }) => (
+const TwitterIcon = ({ size = 15 }) => (
   <svg
     width={size}
     height={size}
@@ -34,7 +35,7 @@ const TwitterIcon = ({ size = 16 }) => (
   </svg>
 );
 
-const LinkedinIcon = ({ size = 16 }) => (
+const LinkedinIcon = ({ size = 15 }) => (
   <svg
     width={size}
     height={size}
@@ -58,7 +59,6 @@ function CoachCard({ c, isTouch }) {
   const [imgSrc, setImgSrc] = useState("");
 
   useEffect(() => {
-    // lazy-load image when card is visible
     if (!imgRef.current) return;
     const el = imgRef.current;
     if (el.getAttribute("data-src") && "IntersectionObserver" in window) {
@@ -73,155 +73,152 @@ function CoachCard({ c, isTouch }) {
       io.observe(el);
       return () => io.disconnect();
     }
-    // fallback
     setImgSrc(el.getAttribute("data-src") || el.src);
   }, []);
 
   const handleToggle = () => setFlipped((v) => !v);
 
   return (
-    <div className="cursor-pointer">
-      <div className={`flip-card w-full aspect-[4/5] mb-6 ${flipped ? "is-flipped" : ""}`}>
+    <div className="w-full h-full flex flex-col justify-between group/card select-none">
+      <div className={`flip-card w-full aspect-[4/5] rounded-[2rem] overflow-hidden mb-5 ${flipped ? "is-flipped" : ""}`}>
         <div className="flip-card-inner">
-          {/* DEPAN */}
+          {/* SISI DEPAN */}
           <div
-            className="flip-card-front group"
+            className="flip-card-front rounded-[2rem] overflow-hidden cursor-pointer shadow-lg shadow-slate-900/5 group"
             onClick={handleToggle}
             onKeyDown={(e) => {
               if (e.key === "Enter" || e.key === " ") handleToggle();
             }}
             role="button"
             tabIndex={0}
-            aria-label={`Lihat detail ${c.name}`}
+            aria-label={`Lihat detail profil ${c.name}`}
           >
-            <div className="relative w-full h-full">
-              <div className="absolute inset-0 bg-[#00E5FF] translate-x-0 translate-y-0 group-hover:translate-x-4 group-hover:translate-y-4 transition-transform duration-500 ease-out z-0"></div>
-              <div className="relative z-10 w-full h-full overflow-hidden bg-slate-100">
-                <img
-                  ref={imgRef}
-                  data-src={c.photo}
-                  src={imgSrc || ""}
-                  alt={c.name}
-                  loading="lazy"
-                  className="w-full h-full object-cover grayscale group-hover:grayscale-0 group-hover:scale-105 transition-all duration-700 ease-out"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-[#0A192F]/80 to-transparent"></div>
-                <div className="absolute bottom-0 left-0 right-0 p-5 z-20">
-                  <p className="text-[10px] font-bold text-[#00E5FF] uppercase tracking-[0.2em] mb-1">
-                    {c.role}
-                  </p>
-                  <h4 className="text-2xl font-serif font-bold text-white">
-                    {c.nickname}
-                  </h4>
+            <div className="relative w-full h-full bg-slate-900 overflow-hidden">
+              <img
+                ref={imgRef}
+                data-src={c.photo}
+                src={imgSrc || ""}
+                alt={c.name}
+                loading="lazy"
+                className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-105"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-[#0A192F] via-[#0A192F]/40 to-transparent"></div>
+
+              {/* Tag Atas */}
+              <div className="absolute top-4 right-4 z-20">
+                <span className="px-3 py-1 bg-white/15 backdrop-blur-md border border-white/20 text-cyan-300 text-[10px] font-black uppercase tracking-widest rounded-full shadow-sm">
+                  {c.role}
+                </span>
+              </div>
+
+              {isTouch && (
+                <div className="absolute top-4 left-4 z-20 bg-black/40 backdrop-blur-sm text-white/80 text-[10px] px-2.5 py-1 rounded-full font-medium">
+                  Sentuh untuk info
                 </div>
-                <div className="absolute top-4 right-4 z-20 bg-[#00E5FF]/90 px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                  <p className="text-[9px] font-bold text-[#0A192F] uppercase tracking-widest">
-                    Lihat Profil
-                  </p>
-                </div>
-                {isTouch && (
-                  <div className="absolute top-4 left-4 z-20 bg-black/40 text-white text-xs px-2 py-1 rounded">
-                    Tap untuk detail
-                  </div>
-                )}
+              )}
+
+              {/* Informasi Bawah */}
+              <div className="absolute bottom-0 left-0 right-0 p-6 z-20">
+                <p className="text-[11px] font-bold text-cyan-400 tracking-wider uppercase mb-1">
+                  {c.speciality}
+                </p>
+                <h4 className="text-2xl font-bold text-white tracking-tight">
+                  {c.name}
+                </h4>
+                <p className="text-xs text-slate-300 mt-0.5 font-medium">
+                  Panggilan: {c.nickname}
+                </p>
               </div>
             </div>
           </div>
 
-          {/* BELAKANG */}
-          <div className="flip-card-back bg-[#0A192F] border-t-2 border-[#00E5FF] p-8 flex flex-col justify-between">
-            <div className="flex items-center gap-4 mb-6">
-              <div className="w-14 h-14 rounded-full overflow-hidden border-2 border-[#00E5FF] flex-shrink-0">
-                <img
-                  src={c.photo}
-                  alt={c.name}
-                  className="w-full h-full object-cover"
-                />
+          {/* SISI BELAKANG */}
+          <div
+            className="flip-card-back bg-[#0A192F] text-white rounded-[2rem] p-6 sm:p-7 flex flex-col justify-between border-2 border-cyan-400/40 shadow-xl cursor-pointer"
+            onClick={handleToggle}
+            role="button"
+            tabIndex={0}
+          >
+            <div>
+              <div className="flex items-center gap-3.5 mb-5">
+                <div className="w-13 h-13 rounded-2xl overflow-hidden border-2 border-cyan-400/60 shrink-0 shadow-md">
+                  <img
+                    src={c.photo}
+                    alt={c.name}
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+                <div className="min-w-0">
+                  <h4 className="text-base font-bold text-white truncate">
+                    {c.name}
+                  </h4>
+                  <p className="text-cyan-400 text-[10px] uppercase tracking-widest font-black truncate">
+                    {c.role}
+                  </p>
+                </div>
               </div>
-              <div>
-                <h4 className="text-lg font-serif font-bold text-white leading-tight">
-                  {c.name}
-                </h4>
-                <p className="text-[#00E5FF] text-[10px] uppercase tracking-[0.2em] font-bold">
-                  {c.role}
-                </p>
+
+              <div className="grid grid-cols-2 gap-2 bg-white/5 rounded-2xl p-3 border border-white/10 mb-4 text-xs">
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Usia</span>
+                  <span className="font-bold text-white">{c.age} Th</span>
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Asal</span>
+                  <span className="font-bold text-white truncate block">{c.nationality}</span>
+                </div>
+              </div>
+
+              <div className="mb-3">
+                <span className="text-[10px] uppercase font-bold text-cyan-400 tracking-wider block mb-1.5 flex items-center gap-1">
+                  <Award size={13} /> Prestasi & Lisensi
+                </span>
+                <ul className="space-y-1.5 max-h-28 overflow-y-auto pr-1 custom-scrollbar">
+                  {c.achievements.map((a, j) => (
+                    <li key={j} className="text-[11px] text-slate-300 flex items-start gap-1.5 leading-snug">
+                      <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-1.5 shrink-0"></span>
+                      <span>{a}</span>
+                    </li>
+                  ))}
+                  {c.achievements.length === 0 && (
+                    <li className="text-[11px] text-slate-400 italic">Belum ada daftar prestasi.</li>
+                  )}
+                </ul>
               </div>
             </div>
 
-            <div className="w-full h-px bg-white/10 mb-6"></div>
-
-            <div className="space-y-3 mb-6 flex-1">
-              <div className="flex justify-between items-center">
-                <span className="text-[10px] uppercase tracking-widest text-white/40 font-bold">
-                  Usia
-                </span>
-                <span className="text-sm font-bold text-white">
-                  {c.age} Tahun
-                </span>
+            <div className="pt-3 border-t border-white/10 flex items-center justify-between text-slate-400 text-[11px]">
+              <span>Klik kartu untuk membalik</span>
+              <div className="flex items-center gap-3 text-slate-300">
+                <a href="#" onClick={(e) => e.stopPropagation()} className="hover:text-cyan-400 transition-colors">
+                  <InstagramIcon />
+                </a>
+                <a href="#" onClick={(e) => e.stopPropagation()} className="hover:text-cyan-400 transition-colors">
+                  <TwitterIcon />
+                </a>
+                <a href="#" onClick={(e) => e.stopPropagation()} className="hover:text-cyan-400 transition-colors">
+                  <LinkedinIcon />
+                </a>
               </div>
-              <div className="flex justify-between items-center">
-                <span className="text-[10px] uppercase tracking-widest text-white/40 font-bold">
-                  Asal
-                </span>
-                <span className="text-sm font-bold text-white">
-                  {c.nationality}
-                </span>
-              </div>
-              <div className="flex justify-between items-start gap-4">
-                <span className="text-[10px] uppercase tracking-widest text-white/40 font-bold flex-shrink-0">
-                  Spesialis
-                </span>
-                <span className="text-sm font-bold text-white text-right">
-                  {c.speciality}
-                </span>
-              </div>
-            </div>
-
-            <div className="mb-6">
-              <p className="text-[10px] uppercase tracking-widest text-white/40 font-bold mb-3">
-                Pencapaian
-              </p>
-              <ul className="space-y-2">
-                {c.achievements.map((a, j) => (
-                  <li key={j} className="flex items-start gap-2">
-                    <span className="w-1 h-1 rounded-full bg-[#00E5FF] mt-2 flex-shrink-0"></span>
-                    <span className="text-xs text-white/70 font-medium">
-                      {a}
-                    </span>
-                  </li>
-                ))}
-                {c.achievements.length === 0 && (
-                  <li className="text-xs text-white/50 italic">
-                    Belum ada pencapaian.
-                  </li>
-                )}
-              </ul>
-            </div>
-
-            <div className="flex items-center gap-4 text-white/30 pt-4 border-t border-white/10">
-              <a href="#" className="hover:text-[#00E5FF] transition-colors">
-                <InstagramIcon size={15} />
-              </a>
-              <a href="#" className="hover:text-[#00E5FF] transition-colors">
-                <TwitterIcon size={15} />
-              </a>
-              <a href="#" className="hover:text-[#00E5FF] transition-colors">
-                <LinkedinIcon size={15} />
-              </a>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Info bawah card */}
-      <div className="pr-4">
-        <p className="text-[10px] font-bold text-[#00E5FF] uppercase tracking-[0.2em] mb-2">
-          {c.role}
-        </p>
-        <h4 className="text-2xl font-serif font-bold text-[#0A192F] mb-3">
+      {/* Rincian Teks Bawah */}
+      <div className="px-1">
+        <div className="flex items-center justify-between gap-2 mb-1">
+          <span className="text-[10px] font-bold text-cyan-600 uppercase tracking-widest">
+            {c.role}
+          </span>
+          <span className="text-[11px] font-semibold text-slate-400">
+            {c.speciality}
+          </span>
+        </div>
+        <h4 className="text-xl font-bold text-slate-900 mb-1.5 tracking-tight group-hover/card:text-blue-600 transition-colors">
           {c.name}
         </h4>
-        <p className="text-sm text-slate-500 font-medium leading-relaxed line-clamp-3">
+        <p className="text-xs text-slate-500 line-clamp-2 leading-relaxed font-normal">
           {c.exp}
         </p>
       </div>
@@ -236,7 +233,6 @@ export default function Coach() {
   const [visible, setVisible] = useState(3);
   const [transitionEnabled, setTransitionEnabled] = useState(true);
   const [isPaused, setIsPaused] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(true);
   const [isTouchDevice, setIsTouchDevice] = useState(false);
   const containerRef = useRef(null);
   const autoplayRef = useRef(null);
@@ -270,7 +266,7 @@ export default function Coach() {
           name: c.users?.full_name || "Instruktur",
           nickname: c.nickname || "Coach",
           role: c.role_title || "Pelatih",
-          exp: c.experience_desc || "Pelatih renang profesional.",
+          exp: c.experience_desc || "Pelatih renang profesional klub Siripbiru.",
           age: c.age || "-",
           nationality: c.nationality || "Indonesia",
           speciality: c.specialty || "Berenang Umum",
@@ -286,12 +282,11 @@ export default function Coach() {
     fetchCoaches();
   }, []);
 
-  // note: do not return early here — keep hooks order stable even before data loads
-
-  // ===== CAROUSEL LOGIC =====
   useEffect(() => {
-    // detect touch devices
-    const touch = ("ontouchstart" in window) || navigator.maxTouchPoints > 0 || window.matchMedia("(hover: none)").matches;
+    const touch =
+      "ontouchstart" in window ||
+      navigator.maxTouchPoints > 0 ||
+      window.matchMedia("(hover: none)").matches;
     setIsTouchDevice(Boolean(touch));
 
     const calc = () => {
@@ -299,7 +294,7 @@ export default function Coach() {
       const v = w >= 1024 ? 3 : w >= 640 ? 2 : 1;
       setVisible(v);
     };
-    // debounce resize
+
     const onResize = () => {
       clearTimeout(resizeTimeout.current);
       resizeTimeout.current = setTimeout(calc, 150);
@@ -314,11 +309,11 @@ export default function Coach() {
 
   const n = coaches.length;
   const clones = visible;
-  const displayed = n > 0 ? [...coaches.slice(-clones), ...coaches, ...coaches.slice(0, clones)] : [];
+  const displayed =
+    n > 0 ? [...coaches.slice(-clones), ...coaches, ...coaches.slice(0, clones)] : [];
 
   useEffect(() => {
     setIndex(clones);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, n]);
 
   const getSlideWidth = () => {
@@ -329,10 +324,10 @@ export default function Coach() {
   const translateX = () => `translateX(${-(index * getSlideWidth())}px)`;
 
   useEffect(() => {
-    if (!isPlaying || isPaused || n === 0) return;
+    if (isPaused || n === 0) return;
     autoplayRef.current = setInterval(() => setIndex((i) => i + 1), 4500);
     return () => clearInterval(autoplayRef.current);
-  }, [isPlaying, isPaused, n]);
+  }, [isPaused, n]);
 
   const pauseAndResume = (timeout = 4000) => {
     setIsPaused(true);
@@ -376,7 +371,6 @@ export default function Coach() {
 
   const handleTouchStart = (e) => {
     touchStartX.current = e.touches[0].clientX;
-    // pause during touch/drag
     setIsPaused(true);
   };
 
@@ -386,12 +380,7 @@ export default function Coach() {
     if (diff > 50) setIndex((i) => i + 1);
     if (diff < -50) setIndex((i) => i - 1);
     touchStartX.current = null;
-    // resume autoplay after short delay
     setTimeout(() => setIsPaused(false), 1200);
-  };
-
-  const togglePlay = () => {
-    setIsPlaying((p) => !p);
   };
 
   const handleKeyDownRoot = (e) => {
@@ -401,10 +390,6 @@ export default function Coach() {
     } else if (e.key === "ArrowRight") {
       e.preventDefault();
       next();
-    } else if (e.key === " " || e.key === "Spacebar") {
-      // Space toggles play/pause
-      e.preventDefault();
-      togglePlay();
     } else if (e.key === "Home") {
       e.preventDefault();
       goTo(0);
@@ -415,12 +400,12 @@ export default function Coach() {
   };
 
   return (
-    <section id="coach" className="py-24 lg:py-32 px-6 bg-white relative">
+    <section id="coach" className="py-24 lg:py-32 px-6 bg-[#f8fafc] relative overflow-hidden font-sans">
       <style>{`
-        .flip-card { perspective: 1000px; }
+        .flip-card { perspective: 1200px; }
         .flip-card-inner {
           position: relative; width: 100%; height: 100%;
-          transition: transform 0.7s cubic-bezier(0.4, 0.2, 0.2, 1);
+          transition: transform 0.65s cubic-bezier(0.4, 0.2, 0.2, 1);
           transform-style: preserve-3d;
         }
         @media (hover: hover) {
@@ -432,71 +417,25 @@ export default function Coach() {
           backface-visibility: hidden; -webkit-backface-visibility: hidden;
         }
         .flip-card-back { transform: rotateY(180deg); }
-
-        /* Carousel styles (scoped) */
-        .coach-carousel{ position:relative; width:100%; margin:20px 0; }
-        .cc-viewport{ overflow:hidden; width:100%; }
-        .cc-track{ display:flex; align-items:stretch; }
-        .cc-slide{ flex:0 0 auto; padding:12px; box-sizing:border-box; display:flex; flex-direction:column; }
-
-        /* Consistent card heights without hard cut: use min-height and flexible layout */
-        .cc-slide { min-height:480px; display:flex; flex-direction:column; }
-        .flip-card{ flex:1 1 auto; }
-        .pr-4{ flex:0 0 120px; }
-
-        /* Ensure images cover the area */
-        .flip-card-front .relative.z-10 img, .flip-card-back .relative img { width:100%; height:100%; object-fit:cover; }
-
-        .cc-btn{ position:absolute; top:50%; transform:translateY(-50%); border:none; background:rgba(10,25,47,0.9); color:white; min-width:44px; min-height:44px; width:44px; height:44px; border-radius:999px; display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:10; }
-        .cc-btn.prev{ left:8px; }
-        .cc-btn.next{ right:8px; }
-        .cc-dots{ position:absolute; left:50%; transform:translateX(-50%); bottom:-18px; display:flex; gap:8px; }
-        .cc-dots .dot{ width:9px; height:9px; border-radius:50%; background:rgba(15,23,42,0.12); border:none; cursor:pointer; }
-        .cc-dots .dot.active{ background:#00E5FF; }
-
-        @media (max-width:1024px){
-          .cc-slide{ min-height:420px; }
-          .pr-4{ flex:0 0 110px; }
-        }
-
-        @media (max-width:640px){
-          .cc-btn{ min-width:44px; min-height:44px; }
-          .cc-slide{ min-height:360px; }
-          .pr-4{ flex:0 0 100px; }
-        }
-
-        /* Play/Pause button */
-        .cc-play{ position:absolute; top:12px; right:12px; background:#00E5FF; color:#0A192F; border-radius:8px; padding:6px 10px; font-weight:700; z-index:12; min-width:44px; min-height:44px; display:flex; align-items:center; gap:8px; }
       `}</style>
 
-      <div className="max-w-7xl mx-auto">
-        {/* HEADER */}
-        <div className="text-center mb-20">
-          <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] mb-4">
-            Meet The Team
-          </h2>
-          <h3 className="text-4xl md:text-5xl font-serif font-bold text-[#0A192F] mb-6">
-            Pelatih <span className="font-light">Terbaik.</span>
+      <div className="max-w-7xl mx-auto relative">
+        {/* HEADER SECTION */}
+        <div className="text-center max-w-2xl mx-auto mb-16">
+          <span className="text-xs font-black uppercase tracking-[0.25em] text-blue-600 bg-blue-50 border border-blue-100 px-4 py-1.5 rounded-full inline-block mb-3">
+            Tim Pelatih Profesional
+          </span>
+          <h3 className="text-3xl md:text-5xl font-black text-slate-900 tracking-tight leading-tight">
+            Instruktur <span className="text-blue-600">Terbaik</span> Klub
           </h3>
-          <svg
-            width="60"
-            height="10"
-            viewBox="0 0 60 10"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-            className="mx-auto"
-          >
-            <path
-              d="M0 5C5 5 5 0 10 0C15 0 15 5 20 5C25 5 25 10 30 10C35 10 35 5 40 5C45 5 45 0 50 0C55 0 55 5 60 5"
-              stroke="#00E5FF"
-              strokeWidth="2"
-            />
-          </svg>
+          <p className="text-slate-500 text-sm md:text-base mt-3 font-medium">
+            Didukung oleh pelatih renang berlisensi nasional yang berdedikasi membimbing teknik, ketahanan, dan prestasi atlet.
+          </p>
         </div>
 
-        {/* Carousel (responsive) */}
+        {/* CAROUSEL WRAPPER */}
         <div
-          className="coach-carousel"
+          className="relative px-2 sm:px-4"
           onMouseEnter={() => setIsPaused(true)}
           onMouseLeave={() => setIsPaused(false)}
           ref={containerRef}
@@ -507,23 +446,15 @@ export default function Coach() {
           onFocus={() => setIsPaused(true)}
           onBlur={() => setIsPaused(false)}
         >
-          <button
-            className="cc-play"
-            onClick={togglePlay}
-            aria-pressed={!isPlaying}
-            aria-label={isPlaying ? "Jeda autoplay" : "Putar autoplay"}
-          >
-            {isPlaying ? "Jeda" : "Putar"}
-          </button>
-          <div className="cc-viewport">
+          {/* TRACK VIEWPORT */}
+          <div className="overflow-hidden w-full py-4">
             <div
-              className="cc-track"
+              className="flex items-stretch"
               aria-live="polite"
-              aria-atomic="true"
               onTransitionEnd={handleTransitionEnd}
               style={{
                 transform: translateX(),
-                transition: transitionEnabled ? "transform 0.5s ease-in-out" : "none",
+                transition: transitionEnabled ? "transform 0.5s cubic-bezier(0.25, 1, 0.5, 1)" : "none",
               }}
               onTouchStart={handleTouchStart}
               onTouchEnd={handleTouchEnd}
@@ -531,7 +462,7 @@ export default function Coach() {
               {displayed.map((c, i) => (
                 <div
                   key={`slide-${c.id || i}`}
-                  className="cc-slide"
+                  className="shrink-0 p-3 sm:p-4 box-border flex flex-col"
                   style={{ width: `${100 / visible}%` }}
                 >
                   <CoachCard c={c} isTouch={isTouchDevice} />
@@ -540,20 +471,36 @@ export default function Coach() {
             </div>
           </div>
 
-          <button className="cc-btn prev" onClick={prev} aria-label="Slide sebelumnya">
-            ‹
-          </button>
-          <button className="cc-btn next" onClick={next} aria-label="Slide berikutnya">
-            ›
-          </button>
+          {/* TOMBOL NAVIGASI SAMPING */}
+          {n > visible && (
+            <>
+              <button
+                onClick={prev}
+                className="absolute -left-2 sm:-left-5 top-1/2 -translate-y-1/2 w-11 h-11 rounded-2xl bg-white border border-slate-200 text-slate-700 hover:text-blue-600 hover:border-blue-300 shadow-xl flex items-center justify-center transition-all active:scale-95 z-20"
+                aria-label="Pelatih sebelumnya"
+              >
+                <ChevronLeft size={20} />
+              </button>
+              <button
+                onClick={next}
+                className="absolute -right-2 sm:-right-5 top-1/2 -translate-y-1/2 w-11 h-11 rounded-2xl bg-white border border-slate-200 text-slate-700 hover:text-blue-600 hover:border-blue-300 shadow-xl flex items-center justify-center transition-all active:scale-95 z-20"
+                aria-label="Pelatih berikutnya"
+              >
+                <ChevronRight size={20} />
+              </button>
+            </>
+          )}
 
-          <div className="cc-dots">
+          {/* TITIK INDIKATOR (DOTS) */}
+          <div className="flex justify-center gap-2 mt-8">
             {coaches.map((_, i) => (
               <button
                 key={i}
-                className={`dot ${index - clones === i ? "active" : ""}`}
+                className={`h-2 rounded-full transition-all duration-300 ${
+                  index - clones === i ? "w-7 bg-blue-600 shadow-sm shadow-blue-600/30" : "w-2 bg-slate-200 hover:bg-slate-300"
+                }`}
                 onClick={() => goTo(i)}
-                aria-label={`Ke slide ${i + 1}`}
+                aria-label={`Lihat pelatih ke-${i + 1}`}
               />
             ))}
           </div>

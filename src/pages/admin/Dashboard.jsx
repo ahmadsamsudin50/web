@@ -37,7 +37,7 @@ export default function Dashboard() {
     const fetchDashboardData = async () => {
       setLoading(true);
 
-      // 1. Fetch Basic Stats (Counts)
+      // 1. Ambil Statistik Dasar (Jumlah Baris)
       const { count: classCount } = await supabase
         .from("classes")
         .select("*", { count: "exact", head: true });
@@ -62,7 +62,7 @@ export default function Dashboard() {
         totalLogs: logCount || 0,
       });
 
-      // 2. Fetch Data for Attendance Trend (Last 7 Sessions)
+      // 2. Ambil Data Tren Kehadiran (7 Sesi Terakhir)
       const { data: logs } = await supabase
         .from("attendance_logs")
         .select(`id, sessions(session_date)`);
@@ -76,22 +76,22 @@ export default function Dashboard() {
           }
         });
 
-        // Urutkan tanggal dan ambil 7 hari terakhir
+        // Urutkan tanggal dan ambil 7 catatan terakhir
         const formattedTrend = Object.keys(trendMap)
-          .sort()
+          .sort((a, b) => new Date(a).getTime() - new Date(b).getTime())
           .slice(-7)
           .map((date) => ({
-            date: new Date(date).toLocaleDateString("en-US", {
+            date: new Date(date).toLocaleDateString("id-ID", {
               month: "short",
               day: "numeric",
             }),
-            Attendance: trendMap[date],
+            Kehadiran: trendMap[date],
           }));
 
         setTrendData(formattedTrend);
       }
 
-      // 3. Fetch Data for Class Distribution (Many-to-Many via Enrollments)
+      // 3. Ambil Data Distribusi Atlet per Kelas Aktif
       const { data: enrollmentsData } = await supabase
         .from("student_enrollments")
         .select(`classes(name)`)
@@ -100,16 +100,16 @@ export default function Dashboard() {
       if (enrollmentsData) {
         const distMap = {};
         enrollmentsData.forEach((enr) => {
-          const className = enr.classes?.name || "Unassigned";
+          const className = enr.classes?.name || "Belum Ditentukan";
           distMap[className] = (distMap[className] || 0) + 1;
         });
 
         const formattedDist = Object.keys(distMap)
           .map((key) => ({
             name: key,
-            Athletes: distMap[key],
+            Atlet: distMap[key],
           }))
-          .sort((a, b) => b.Athletes - a.Athletes); // Urutkan dari terbanyak
+          .sort((a, b) => b.Atlet - a.Atlet);
 
         setClassDistData(formattedDist);
       }
@@ -120,7 +120,6 @@ export default function Dashboard() {
     fetchDashboardData();
   }, []);
 
-  // Komponen Card Statistik
   const StatCard = ({ title, value, icon, colorClass, bgClass }) => (
     <div className="bg-white p-6 rounded-3xl shadow-xl shadow-blue-900/5 border border-slate-100 flex items-center gap-5 hover:-translate-y-1 transition-transform duration-300">
       <div
@@ -137,15 +136,14 @@ export default function Dashboard() {
     </div>
   );
 
-  // Palet Warna untuk Bar Chart
   const COLORS = ["#2563eb", "#3b82f6", "#60a5fa", "#93c5fd", "#bfdbfe"];
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#f8fafc] flex flex-col items-center justify-center">
+      <div className="min-h-screen bg-[#f8fafc] flex flex-col items-center justify-center font-sans">
         <Loader2 size={40} className="text-blue-600 animate-spin mb-4" />
         <p className="text-slate-500 font-medium animate-pulse">
-          Menganalisis metrik dashboard...
+          Menganalisis metrik dasbor...
         </p>
       </div>
     );
@@ -153,17 +151,16 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-[#f8fafc] p-4 md:p-8 font-sans">
-      {/* Header Section */}
       <div className="max-w-7xl mx-auto mb-8">
         <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">
           Gambaran Umum
         </h1>
         <p className="text-slate-500 mt-1 text-sm">
-          Statistik real-time dan metrik kinerja klub.
+          Statistik langsung dan metrik performa klub renang.
         </p>
       </div>
 
-      {/* Top Statistic Cards */}
+      {/* Kartu Metrik Utama */}
       <div className="max-w-7xl mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <StatCard
           title="Total Atlet"
@@ -195,9 +192,9 @@ export default function Dashboard() {
         />
       </div>
 
-      {/* Charts Section */}
+      {/* Bagian Grafik Analitik */}
       <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-6 pb-10">
-        {/* Chart 1: Attendance Trends */}
+        {/* Grafik 1: Tren Kehadiran */}
         <div className="bg-white p-6 md:p-8 rounded-3xl shadow-xl shadow-blue-900/5 border border-slate-100 flex flex-col h-[400px]">
           <div className="flex items-center justify-between mb-6">
             <div>
@@ -205,7 +202,7 @@ export default function Dashboard() {
                 Tren Kehadiran
               </h2>
               <p className="text-xs font-medium text-slate-400 mt-0.5">
-                7 sesi terakhir yang tercatat
+                Jumlah presensi pada 7 sesi terakhir
               </p>
             </div>
             <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400">
@@ -262,7 +259,7 @@ export default function Dashboard() {
                   />
                   <Area
                     type="monotone"
-                    dataKey="Attendance"
+                    dataKey="Kehadiran"
                     stroke="#2563eb"
                     strokeWidth={3}
                     fillOpacity={1}
@@ -273,21 +270,21 @@ export default function Dashboard() {
               </ResponsiveContainer>
             ) : (
               <div className="h-full flex items-center justify-center text-slate-400 text-sm">
-                No attendance data available yet.
+                Belum ada data kehadiran yang tercatat.
               </div>
             )}
           </div>
         </div>
 
-        {/* Chart 2: Class Distribution */}
+        {/* Grafik 2: Distribusi Atlet per Kelas */}
         <div className="bg-white p-6 md:p-8 rounded-3xl shadow-xl shadow-blue-900/5 border border-slate-100 flex flex-col h-[400px]">
           <div className="flex items-center justify-between mb-6">
             <div>
               <h2 className="text-lg font-bold text-slate-800">
-                Athlete Distribution
+                Distribusi Atlet
               </h2>
               <p className="text-xs font-medium text-slate-400 mt-0.5">
-                Number of athletes per active class
+                Jumlah atlet terdaftar per kelompok kelas aktif
               </p>
             </div>
             <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400">
@@ -326,7 +323,7 @@ export default function Dashboard() {
                       boxShadow: "0 10px 15px -3px rgb(0 0 0 / 0.1)",
                     }}
                   />
-                  <Bar dataKey="Athletes" radius={[6, 6, 0, 0]} maxBarSize={50}>
+                  <Bar dataKey="Atlet" radius={[6, 6, 0, 0]} maxBarSize={50}>
                     {classDistData.map((entry, index) => (
                       <Cell
                         key={`cell-${index}`}
@@ -338,7 +335,7 @@ export default function Dashboard() {
               </ResponsiveContainer>
             ) : (
               <div className="h-full flex items-center justify-center text-slate-400 text-sm">
-                No active enrollment data available yet.
+                Belum ada data pendaftaran kelas yang aktif.
               </div>
             )}
           </div>

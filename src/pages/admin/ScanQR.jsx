@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
-import { Html5QrcodeScanner } from "html5-qrcode";
+import { Html5Qrcode } from "html5-qrcode";
 import { supabase } from "../../utils/supabaseClient";
 import { toast, Toaster } from "react-hot-toast";
 import {
@@ -7,14 +7,12 @@ import {
   Video,
   CheckCircle2,
   XCircle,
-  Info,
   CalendarDays,
   Camera,
+  AlertTriangle,
+  RefreshCw,
 } from "lucide-react";
 
-// ============================================================
-// AUDIO ENGINE - Web Audio API
-// ============================================================
 function useAudioFeedback() {
   const audioCtx = useRef(null);
   const getCtx = useCallback(() => {
@@ -65,9 +63,6 @@ function useAudioFeedback() {
   return { playSuccess, playError };
 }
 
-// ============================================================
-// HAPTIC ENGINE - Vibration API
-// ============================================================
 function useHapticFeedback() {
   const vibrate = useCallback((pattern) => {
     if ("vibrate" in navigator) {
@@ -79,19 +74,24 @@ function useHapticFeedback() {
   return { successVibrate, errorVibrate };
 }
 
-// ============================================================
-// KOMPONEN UTAMA
-// ============================================================
 export default function ScanQR() {
   const [activeSessions, setActiveSessions] = useState([]);
   const [selectedSession, setSelectedSession] = useState("");
   const [scanStatus, setScanStatus] = useState({ type: "idle", message: "" });
-  const scannerRef = useRef(null);
+  const [cameraError, setCameraError] = useState("");
+  const [isCameraStarting, setIsCameraStarting] = useState(false);
+
+  const html5QrCodeRef = useRef(null);
+  const isProcessingRef = useRef(false);
+  const activeSessionsRef = useRef([]);
 
   const { playSuccess, playError } = useAudioFeedback();
   const { successVibrate, errorVibrate } = useHapticFeedback();
 
-  // Fetch sesi aktif
+  useEffect(() => {
+    activeSessionsRef.current = activeSessions;
+  }, [activeSessions]);
+
   useEffect(() => {
     const fetchActiveSessions = async () => {
       const { data, error } = await supabase
@@ -99,397 +99,340 @@ export default function ScanQR() {
         .select("*")
         .eq("is_active", true)
         .order("created_at", { ascending: false });
-      if (error) toast.error("Gagal memuat sesi aktif.");
+      if (error) toast.error("Gagal memuat daftar gerbang aktif.");
       else if (data) setActiveSessions(data);
     };
     fetchActiveSessions();
   }, []);
 
-  // Inisialisasi / cleanup scanner
-  useEffect(() => {
-    if (!selectedSession) {
-      if (scannerRef.current) {
-        scannerRef.current.clear().catch(() => {});
-        scannerRef.current = null;
+  const handleBarcodeDecoded = async (decodedText) => {
+    if (isProcessingRef.current) return;
+    isProcessingRef.current = true;
+
+    setScanStatus({ type: "info", message: "Memverifikasi Kode QR..." });
+
+    try {
+      // 1. Identifikasi data atlet melalui token QR
+      const { data: student, error: studentError } = await supabase
+        .from("students")
+        .select("id, users(full_name)")
+        .eq("qr_token", decodedText)
+        .single();
+
+      if (studentError || !student) throw new Error("Kode QR tidak valid atau belum terdaftar.");
+
+      // 2. Cegah duplikasi absensi pada sesi yang sama
+      const { data: existingLog } = await supabase
+        .from("attendance_logs")
+        .select("id")
+        .eq("session_id", selectedSession)
+        .eq("student_id", student.id)
+        .maybeSingle();
+
+      if (existingLog) {
+        throw new Error(`${student.users?.full_name || "Atlet"} sudah melakukan presensi di sesi ini.`);
       }
+
+      // 3. Verifikasi konfigurasi kelas sesi yang dipilih
+      const sessionObj = activeSessionsRef.current.find((s) => s.id === selectedSession);
+      if (!sessionObj || !sessionObj.class_ids || sessionObj.class_ids.length === 0) {
+        throw new Error("Konfigurasi sesi tidak valid (kelas latihan belum ditentukan).");
+      }
+
+      // 4. Periksa apakah atlet memiliki pendaftaran yang berstatus 'active' pada kelas sesi ini
+      const { data: enrollments, error: enrollError } = await supabase
+        .from("student_enrollments")
+        .select("id, class_id, status, classes(name, max_sessions)")
+        .eq("student_id", student.id)
+        .eq("status", "active")
+        .in("class_id", sessionObj.class_ids)
+        .limit(1);
+
+      if (enrollError || !enrollments || enrollments.length === 0) {
+        // Cek apakah sebenarnya pernah terdaftar tetapi statusnya sudah selesai (completed)
+        const { data: completedEnrollment } = await supabase
+          .from("student_enrollments")
+          .select("id, classes(name)")
+          .eq("student_id", student.id)
+          .eq("status", "completed")
+          .in("class_id", sessionObj.class_ids)
+          .limit(1);
+
+        if (completedEnrollment && completedEnrollment.length > 0) {
+          throw new Error(`Masa latihan ${completedEnrollment[0].classes?.name || "kelas ini"} sudah selesai. Harap daftar ulang.`);
+        }
+
+        throw new Error("Atlet tidak terdaftar aktif pada kelas di sesi latihan ini.");
+      }
+
+      const activeEnrollment = enrollments[0];
+
+      // 5. Masukkan catatan absensi dengan menyertakan enrollment_id kelas terkait
+      const { error: logError } = await supabase
+        .from("attendance_logs")
+        .insert([
+          {
+            session_id: selectedSession,
+            student_id: student.id,
+            status: "hadir_qr",
+            enrollment_id: activeEnrollment.id,
+          },
+        ]);
+
+      if (logError) throw logError;
+
+      // 6. Hitung akumulasi kehadiran khusus untuk enrollment kelas ini
+      const { count: attendCount } = await supabase
+        .from("attendance_logs")
+        .select("*", { count: "exact", head: true })
+        .eq("enrollment_id", activeEnrollment.id)
+        .in("status", ["hadir_qr", "hadir_manual"]);
+
+      const currentTotal = attendCount || 1;
+      const maxSessions = activeEnrollment.classes?.max_sessions || 12;
+      let isCompleted = false;
+
+      // Jika jumlah kehadiran mencapai atau melampaui batas maksimal, tandai pendaftaran kelas ini menjadi 'completed'
+      if (currentTotal >= maxSessions) {
+        await supabase
+          .from("student_enrollments")
+          .update({ status: "completed", completed_at: new Date().toISOString() })
+          .eq("id", activeEnrollment.id);
+        isCompleted = true;
+      }
+
+      playSuccess();
+      successVibrate();
+
+      const message = isCompleted
+        ? `${student.users?.full_name} (${activeEnrollment.classes?.name}): Selesai ${currentTotal}/${maxSessions} sesi!`
+        : `${student.users?.full_name} (${activeEnrollment.classes?.name}): ${currentTotal}/${maxSessions} Sesi`;
+
+      setScanStatus({ type: "success", message });
+    } catch (err) {
+      playError();
+      errorVibrate();
+      setScanStatus({ type: "error", message: err.message });
+    } finally {
+      setTimeout(() => {
+        setScanStatus({ type: "idle", message: "" });
+        isProcessingRef.current = false;
+      }, 2500);
+    }
+  };
+
+  useEffect(() => {
+    let isSubscribed = true;
+
+    const stopCamera = async () => {
+      if (html5QrCodeRef.current) {
+        try {
+          if (html5QrCodeRef.current.isScanning) {
+            await html5QrCodeRef.current.stop();
+          }
+          await html5QrCodeRef.current.clear();
+        } catch (_) {}
+        html5QrCodeRef.current = null;
+      }
+    };
+
+    if (!selectedSession) {
+      stopCamera();
+      setCameraError("");
       return;
     }
 
-    const timeout = setTimeout(() => {
-      const readerEl = document.getElementById("reader");
-      if (!readerEl) return;
+    const startCamera = async () => {
+      await stopCamera();
+      if (!isSubscribed) return;
 
-      if (scannerRef.current) {
-        scannerRef.current.clear().catch(() => {});
+      setCameraError("");
+      setIsCameraStarting(true);
+
+      const targetEl = document.getElementById("reader");
+      if (!targetEl) {
+        setIsCameraStarting(false);
+        return;
       }
 
-      const scanner = new Html5QrcodeScanner(
-        "reader",
-        {
-          qrbox: { width: 280, height: 280 },
+      try {
+        const qrCodeInstance = new Html5Qrcode("reader");
+        html5QrCodeRef.current = qrCodeInstance;
+
+        const config = {
           fps: 10,
-          aspectRatio: 1.0,
-          showTorchButtonIfSupported: true,
-          videoConstraints: {
-            facingMode: "environment",
+          qrbox: (viewfinderWidth, viewfinderHeight) => {
+            const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+            const edgeSize = Math.floor(minEdge * 0.7);
+            return { width: edgeSize, height: edgeSize };
           },
-        },
-        false,
-      );
+          aspectRatio: 1.0,
+        };
 
-      scanner.render(
-        async (decodedText) => {
-          // Pause camera immediately
-          scanner.pause(true);
-          setScanStatus({ type: "info", message: "Verifying QR Code & Progress..." });
+        // facingMode: "environment" mengarahkan kamera ke kamera belakang pada perangkat seluler
+        await qrCodeInstance.start(
+          { facingMode: "environment" },
+          config,
+          (decodedText) => {
+            handleBarcodeDecoded(decodedText);
+          },
+          () => {}
+        );
 
-          try {
-            // 1. Cari data student berdasarkan QR Token
-            const { data: student, error: studentError } = await supabase
-              .from("students")
-              .select("id, users(full_name)")
-              .eq("qr_token", decodedText)
-              .single();
-
-            if (studentError || !student)
-              throw new Error("Invalid or Unregistered QR Pass");
-
-            // 2. Cek apakah student sudah absen di sesi ini (Mencegah Double Scan)
-            const { data: existingLog } = await supabase
-              .from("attendance_logs")
-              .select("id")
-              .eq("session_id", selectedSession)
-              .eq("student_id", student.id)
-              .maybeSingle();
-
-            if (existingLog) {
-              throw new Error(`${student.users?.full_name || "Athlete"} is already checked in!`);
-            }
-
-            // 3. Dapatkan konteks kelas dari Session yang dipilih
-            const sessionObj = activeSessions.find(s => s.id === selectedSession);
-            if (!sessionObj || !sessionObj.class_ids || sessionObj.class_ids.length === 0) {
-              throw new Error("Invalid session configuration. No classes assigned.");
-            }
-
-            // 4. Cari Enrollment aktif student untuk kelas yang ada di sesi ini
-            const { data: enrollments, error: enrollError } = await supabase
-              .from("student_enrollments")
-              .select("id, class_id, classes(name, max_sessions)")
-              .eq("student_id", student.id)
-              .eq("status", "active")
-              .in("class_id", sessionObj.class_ids)
-              .limit(1); // Ambil 1 enrollment yang cocok
-
-            if (enrollError || !enrollments || enrollments.length === 0) {
-              throw new Error("Athlete does not have an active enrollment for this session's class.");
-            }
-
-            const activeEnrollment = enrollments[0];
-
-            // 5. Insert Log Absensi dengan enrollment_id
-            const { error: logError } = await supabase
-              .from("attendance_logs")
-              .insert([{
-                session_id: selectedSession,
-                student_id: student.id,
-                status: "hadir_qr",
-                enrollment_id: activeEnrollment.id
-              }]);
-
-            if (logError) throw logError;
-
-            // 6. Hitung Total Kehadiran untuk mengecek kelulusan (Progress)
-            const { count: attendCount, error: countError } = await supabase
-              .from("attendance_logs")
-              .select("*", { count: "exact", head: true })
-              .eq("enrollment_id", activeEnrollment.id)
-              .in("status", ["hadir_qr", "hadir_manual"]);
-
-            let isCompleted = false;
-            const maxSessions = activeEnrollment.classes.max_sessions || 12;
-
-            if (!countError && attendCount >= maxSessions) {
-              // Auto-Complete Class
-              await supabase
-                .from("student_enrollments")
-                .update({ status: 'completed', completed_at: new Date().toISOString() })
-                .eq("id", activeEnrollment.id);
-              isCompleted = true;
-            }
-
-            // -> SUKSES (suara + haptic + overlay)
-            playSuccess();
-            successVibrate();
-
-            let successMessage = `${student.users?.full_name} (${attendCount}/${maxSessions})`;
-            if (isCompleted) {
-              successMessage = `🎉 Congrats ${student.users?.full_name}! Class Completed!`;
-            }
-
-            setScanStatus({
-              type: "success",
-              message: successMessage,
-            });
-
-          } catch (err) {
-            // -> ERROR (suara + haptic + overlay)
-            playError();
-            errorVibrate();
-            setScanStatus({ type: "error", message: err.message });
-          } finally {
-            // Cooldown selama tepat 2.5 detik
-            setTimeout(() => {
-              setScanStatus({ type: "idle", message: "" });
-              scanner.resume(); // Kamera hidup lagi
-            }, 2500);
-          }
-        },
-        () => {},
-      );
-
-      scannerRef.current = scanner;
-    }, 150);
-
-    return () => {
-      clearTimeout(timeout);
-      if (scannerRef.current) {
-        scannerRef.current.clear().catch(() => {});
-        scannerRef.current = null;
+        if (isSubscribed) {
+          setIsCameraStarting(false);
+        }
+      } catch (err) {
+        if (!isSubscribed) return;
+        setIsCameraStarting(false);
+        const errMsg = err?.message || String(err);
+        if (errMsg.includes("NotAllowedError") || errMsg.includes("Permission denied")) {
+          setCameraError("Izin kamera ditolak. Silakan aktifkan izin kamera pada peramban Anda.");
+        } else if (errMsg.includes("NotFoundError") || errMsg.includes("DevicesNotFoundError")) {
+          setCameraError("Kamera tidak terdeteksi pada perangkat ini.");
+        } else {
+          setCameraError("Gagal mengakses kamera: " + errMsg);
+        }
       }
     };
-  }, [selectedSession, activeSessions, playSuccess, playError, successVibrate, errorVibrate]);
+
+    const timer = setTimeout(() => {
+      startCamera();
+    }, 200);
+
+    return () => {
+      isSubscribed = false;
+      clearTimeout(timer);
+      stopCamera();
+    };
+  }, [selectedSession]);
 
   return (
     <div className="min-h-screen bg-[#f8fafc] p-4 md:p-8 font-sans">
-      <Toaster
-        position="top-right"
-        toastOptions={{ style: { borderRadius: "16px", fontWeight: "500" } }}
-      />
-
-      {/* Header */}
-      <div className="max-w-7xl mx-auto mb-8">
-        <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight flex items-center gap-3">
-          <ScanLine className="text-blue-600" size={32} />
-          QR Access Gate
+      <Toaster position="top-right" />
+      <div className="max-w-7xl mx-auto mb-6">
+        <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight flex items-center gap-3">
+          <ScanLine className="text-blue-600" size={28} />
+          Pemindai Presensi QR
         </h1>
         <p className="text-slate-500 mt-1 text-sm">
-          Scan athlete digital passes to record attendance and track class progress.
+          Pindai kartu identitas digital atlet untuk mencatat kehadiran latihan secara langsung.
         </p>
       </div>
 
       <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Panel Kiri */}
-        <div className="md:col-span-1 space-y-6">
-          <div className="bg-white rounded-3xl shadow-xl shadow-blue-900/5 border border-slate-100 p-6">
-            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-              <CalendarDays size={16} /> Gate Control
+        <div className="md:col-span-1 space-y-4">
+          <div className="bg-white rounded-3xl border border-slate-200 p-5 shadow-sm">
+            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+              <CalendarDays size={16} /> Pilih Gerbang Latihan
             </h2>
-            <div className="space-y-2">
-              <label className="text-[11px] font-bold text-slate-500">
-                Active Session
-              </label>
-              <select
-                value={selectedSession}
-                onChange={(e) => {
-                  setSelectedSession(e.target.value);
-                  setScanStatus({ type: "idle", message: "" });
-                }}
-                className="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all font-medium text-slate-700 cursor-pointer shadow-inner"
-              >
-                <option value="">-- Select Active Gate --</option>
-                {activeSessions.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
+            <select
+              value={selectedSession}
+              onChange={(e) => {
+                setSelectedSession(e.target.value);
+                setScanStatus({ type: "idle", message: "" });
+              }}
+              className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl text-sm font-medium text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+            >
+              <option value="">-- Pilih Sesi Aktif --</option>
+              {activeSessions.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
             {activeSessions.length === 0 && (
-              <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-2xl flex items-start gap-3 text-amber-700">
-                <Info size={18} className="flex-shrink-0 mt-0.5" />
-                <p className="text-xs font-medium">
-                  No active sessions found. Please create or open a session
-                  first in the <b>Sessions</b> menu.
-                </p>
-              </div>
+              <p className="text-xs text-amber-600 mt-2 font-medium">
+                Tidak ada sesi aktif. Buka sesi terlebih dahulu di menu <b>Sesi Latihan</b>.
+              </p>
             )}
           </div>
 
-          {/* System Status */}
-          <div className="bg-white rounded-3xl shadow-xl shadow-blue-900/5 border border-slate-100 p-6">
-            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">
-              System Status
+          <div className="bg-white rounded-3xl border border-slate-200 p-5 shadow-sm">
+            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">
+              Status Pemindai
             </h2>
             {selectedSession ? (
-              <div className="flex items-center gap-3 text-emerald-600 bg-emerald-50 p-4 rounded-2xl border border-emerald-100">
-                <span className="relative flex h-3 w-3">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
-                </span>
-                <span className="text-sm font-bold">
-                  Scanner Active & Ready
-                </span>
-              </div>
+              cameraError ? (
+                <div className="flex items-center gap-2.5 text-rose-700 bg-rose-50 p-3 rounded-xl border border-rose-200 text-xs font-bold">
+                  <AlertTriangle size={16} className="shrink-0" />
+                  Kamera Bermasalah
+                </div>
+              ) : isCameraStarting ? (
+                <div className="flex items-center gap-2.5 text-amber-700 bg-amber-50 p-3 rounded-xl border border-amber-200 text-xs font-bold">
+                  <RefreshCw size={14} className="animate-spin" />
+                  Menghubungkan Kamera...
+                </div>
+              ) : (
+                <div className="flex items-center gap-2.5 text-emerald-700 bg-emerald-50 p-3 rounded-xl border border-emerald-200 text-xs font-bold">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></span>
+                  Kamera Aktif & Siap Memindai
+                </div>
+              )
             ) : (
-              <div className="flex items-center gap-3 text-slate-500 bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                <div className="h-3 w-3 rounded-full bg-slate-300"></div>
-                <span className="text-sm font-bold">Scanner Offline</span>
+              <div className="flex items-center gap-2 text-slate-500 bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs font-bold">
+                <span className="w-2.5 h-2.5 rounded-full bg-slate-400"></span>
+                Kamera Tidak Aktif
               </div>
             )}
           </div>
         </div>
 
-        {/* Panel Kanan: Kamera */}
         <div className="md:col-span-2">
-          <div className="bg-white rounded-3xl shadow-xl shadow-blue-900/5 border border-slate-100 p-6 h-full min-h-[500px] flex flex-col relative overflow-hidden">
-            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2 relative z-10">
-              <Camera size={16} /> Viewfinder
+          <div className="bg-white rounded-3xl border border-slate-200 p-5 shadow-sm min-h-[440px] flex flex-col items-center justify-center relative overflow-hidden">
+            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest self-start mb-4 flex items-center gap-2">
+              <Camera size={16} /> Jendela Kamera
             </h2>
 
-            <div
-              className={`flex-1 flex flex-col justify-center items-center relative z-10 ${!selectedSession ? "hidden" : "flex"}`}
-            >
-              {/* ==================================================== */}
-              {/* OVERLAY NOTIFIKASI SCAN + COOLDOWN INDICATOR         */}
-              {/* ==================================================== */}
-              {scanStatus.type !== "idle" && (
-                <div className="absolute inset-x-0 top-2 z-20 flex justify-center px-4 animate-in slide-in-from-top-4 fade-in duration-300">
-                  <div
-                    className={`px-5 py-4 rounded-2xl shadow-2xl flex items-center gap-4 w-full max-w-sm font-bold border backdrop-blur-md
-                    ${scanStatus.type === "success" ? "bg-emerald-500/95 text-white border-emerald-400" : ""}
-                    ${scanStatus.type === "error" ? "bg-red-500/95 text-white border-red-400" : ""}
-                    ${scanStatus.type === "info" ? "bg-blue-600/95 text-white border-blue-400" : ""}
-                  `}
-                  >
-                    {/* ICON KIRI */}
-                    {scanStatus.type === "success" && (
-                      <CheckCircle2
-                        size={28}
-                        className="flex-shrink-0 animate-in zoom-in"
-                      />
-                    )}
-                    {scanStatus.type === "error" && (
-                      <XCircle
-                        size={28}
-                        className="flex-shrink-0 animate-in zoom-in"
-                      />
-                    )}
-                    {scanStatus.type === "info" && (
-                      <ScanLine
-                        size={28}
-                        className="flex-shrink-0 animate-pulse"
-                      />
-                    )}
+            {selectedSession ? (
+              <div className="w-full flex flex-col items-center">
+                {scanStatus.type !== "idle" && (
+                  <div className={`mb-4 px-4 py-3 rounded-xl flex items-center gap-3 w-full max-w-sm text-xs font-bold text-white shadow-md animate-in fade-in zoom-in-95 ${
+                    scanStatus.type === "success" ? "bg-emerald-600" : scanStatus.type === "error" ? "bg-rose-600" : "bg-blue-600"
+                  }`}>
+                    {scanStatus.type === "success" && <CheckCircle2 size={20} className="shrink-0" />}
+                    {scanStatus.type === "error" && <XCircle size={20} className="shrink-0" />}
+                    {scanStatus.type === "info" && <ScanLine size={20} className="animate-pulse shrink-0" />}
+                    <span className="truncate flex-1">{scanStatus.message}</span>
+                  </div>
+                )}
 
-                    {/* TEKS TENGAH */}
-                    <div className="flex-1 flex flex-col min-w-0">
-                      <span className="text-sm leading-tight truncate">
-                        {scanStatus.message}
-                      </span>
-                      {/* Sub-text Cooldown */}
-                      {(scanStatus.type === "success" ||
-                        scanStatus.type === "error") && (
-                        <span className="text-[11px] font-medium opacity-80 mt-0.5 font-mono">
-                          Camera pausing...
-                        </span>
-                      )}
-                      {scanStatus.type === "info" && (
-                        <span className="text-[11px] font-medium opacity-80 mt-0.5">
-                          Authenticating pass...
-                        </span>
+                {cameraError ? (
+                  <div className="p-6 max-w-sm text-center bg-rose-50 border border-rose-200 rounded-2xl text-rose-800 space-y-2">
+                    <AlertTriangle size={32} className="mx-auto text-rose-500" />
+                    <p className="font-bold text-sm">Gagal Mengakses Kamera</p>
+                    <p className="text-xs text-rose-600 leading-relaxed">{cameraError}</p>
+                    <p className="text-[11px] text-slate-500 pt-2">
+                      Pastikan situs diakses melalui protokol <b>HTTPS</b> atau <b>localhost</b> dan perizinan kamera sudah diizinkan.
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="w-full max-w-xs sm:max-w-sm rounded-2xl overflow-hidden border-4 border-slate-100 shadow-inner bg-black relative">
+                      <div id="reader" className="w-full"></div>
+                      {isCameraStarting && (
+                        <div className="absolute inset-0 bg-slate-900/80 flex flex-col items-center justify-center text-white gap-2">
+                          <RefreshCw size={24} className="animate-spin text-blue-400" />
+                          <span className="text-xs font-medium">Menyalakan kamera...</span>
+                        </div>
                       )}
                     </div>
-
-                    {/* CIRCULAR PROGRESS BAR (KANAN) */}
-                    {(scanStatus.type === "success" ||
-                      scanStatus.type === "error") && (
-                      <div className="relative flex items-center justify-center w-8 h-8 flex-shrink-0">
-                        {/* Lingkaran Background */}
-                        <svg
-                          className="w-full h-full transform -rotate-90"
-                          viewBox="0 0 24 24"
-                        >
-                          <circle
-                            cx="12"
-                            cy="12"
-                            r="10"
-                            stroke="currentColor"
-                            strokeWidth="3"
-                            fill="none"
-                            className="opacity-20"
-                          />
-                          {/* Lingkaran Animasi (Berkurang) */}
-                          <circle
-                            cx="12"
-                            cy="12"
-                            r="10"
-                            stroke="currentColor"
-                            strokeWidth="3"
-                            fill="none"
-                            strokeDasharray="63"
-                            strokeLinecap="round"
-                            style={{
-                              animation: "cooldown-dash 2.5s linear forwards",
-                            }}
-                          />
-                        </svg>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Tempat Render Kamera */}
-              <div className="w-full max-w-sm mx-auto overflow-hidden rounded-[2rem] border-8 border-slate-50 shadow-inner bg-black relative">
-                <div id="reader" className="w-full"></div>
+                    <p className="text-xs text-slate-400 mt-4 text-center">
+                      Arahkan kamera ke Kode QR pada Kartu Digital atlet.
+                    </p>
+                  </>
+                )}
               </div>
-              <p className="text-center text-xs text-slate-400 font-medium mt-6">
-                Position the athlete's QR Code within the frame to scan.
-              </p>
-            </div>
-
-            {/* Belum pilih sesi */}
-            {!selectedSession && (
-              <div className="flex-1 flex flex-col items-center justify-center text-slate-400 text-center animate-in fade-in">
-                <div className="w-24 h-24 bg-slate-50 rounded-full flex items-center justify-center mb-4">
-                  <Video size={40} className="text-slate-300" />
-                </div>
-                <h3 className="text-lg font-bold text-slate-700">
-                  Awaiting Gate Selection
-                </h3>
-                <p className="text-sm mt-2 max-w-xs">
-                  Please select an active session on the left panel to
-                  initialize the camera system.
-                </p>
+            ) : (
+              <div className="text-center text-slate-400 py-12">
+                <Video size={40} className="mx-auto mb-2 text-slate-300" />
+                <p className="text-sm font-bold text-slate-600">Gerbang Belum Dipilih</p>
+                <p className="text-xs mt-1">Pilih sesi aktif di panel kiri untuk menyalakan kamera.</p>
               </div>
             )}
           </div>
         </div>
       </div>
-
-      {/* CSS injection: Styling Html5-Qrcode & Keyframe Progress Bar */}
-      <style
-        dangerouslySetInnerHTML={{
-          __html: `
-        #reader { border: none !important; }
-        #reader button {
-            background-color: #2563eb !important; color: white !important; border: none !important;
-            padding: 8px 16px !important; border-radius: 8px !important; font-weight: bold !important;
-            cursor: pointer !important; margin-top: 10px !important; transition: background 0.3s;
-        }
-        #reader button:hover { background-color: #1d4ed8 !important; }
-        #reader a { color: #60a5fa !important; text-decoration: none !important; }
-        #reader__dashboard_section_csr span { color: white !important; }
-        /* KEYFRAME ANIMASI COOLDOWN: Garis lingkaran berkurang hingga habis */
-        @keyframes cooldown-dash {
-          0% { stroke-dashoffset: 0; }
-          100% { stroke-dashoffset: 63; }
-        }
-      `,
-        }}
-      />
     </div>
   );
 }

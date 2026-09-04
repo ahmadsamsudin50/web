@@ -3,26 +3,56 @@ import { supabase } from "../../utils/supabaseClient";
 import { toast, Toaster } from "react-hot-toast";
 import {
   LayoutTemplate, Save, Plus, Trash2, Edit3, Type, Star, Layers,
-  CheckCircle2, XCircle, X, MinusCircle, Image as ImageIcon,
-  Activity, Droplets, Medal, Upload, Eye, EyeOff, MapPin, Phone,
-  Mail, FileText, ChevronRight, AlertCircle, Loader2
+  CheckCircle2, X, MinusCircle, Image as ImageIcon,
+  Activity, Droplets, Medal, Eye, EyeOff, MapPin,
+  AlertTriangle, Loader2
 } from "lucide-react";
 
-// ─────────────────────────────────────────────
-// ICON MAP for course icons
-// ─────────────────────────────────────────────
+// Pemetaan Ikon Program Latihan
 const ICON_MAP = { Droplets, Activity, Medal, Star };
 
 const ICON_OPTIONS = [
-  { value: "Droplets", label: "Droplets — Pemula" },
-  { value: "Activity", label: "Activity — Menengah" },
-  { value: "Medal",    label: "Medal — Elit" },
-  { value: "Star",     label: "Star — Umum" },
+  { value: "Droplets", label: "Tetes Air — Pemula" },
+  { value: "Activity", label: "Aktivitas — Menengah" },
+  { value: "Medal",    label: "Medali — Prestasi / Lanjutan" },
+  { value: "Star",     label: "Bintang — Umum / Spesial" },
 ];
 
-// ─────────────────────────────────────────────
-// SMALL REUSABLE COMPONENTS
-// ─────────────────────────────────────────────
+function CustomConfirmModal({ isOpen, onClose, onConfirm, title, message, confirmLabel = "Hapus", isDestructive = true }) {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden p-6 text-center animate-in zoom-in-95 duration-200">
+        <div className={`w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4 ${
+          isDestructive ? "bg-rose-50 text-rose-500" : "bg-blue-50 text-blue-600"
+        }`}>
+          <AlertTriangle size={28} />
+        </div>
+        <h3 className="text-base font-black text-slate-800 mb-2">{title}</h3>
+        <p className="text-xs text-slate-500 leading-relaxed mb-6">{message}</p>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl text-xs transition-all"
+          >
+            Batal
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className={`flex-1 py-2.5 font-bold rounded-xl text-xs text-white shadow-md transition-all active:scale-95 ${
+              isDestructive ? "bg-rose-600 hover:bg-rose-700 shadow-rose-600/30" : "bg-blue-600 hover:bg-blue-700 shadow-blue-600/30"
+            }`}
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const Field = ({ label, children }) => (
   <div className="space-y-1.5">
     <label className="block text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400">{label}</label>
@@ -30,20 +60,20 @@ const Field = ({ label, children }) => (
   </div>
 );
 
-const inputCls = "w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-800 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all";
+const inputCls = "w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all font-medium";
 
 const Btn = ({ children, variant = "primary", loading, className = "", ...props }) => {
-  const base = "inline-flex items-center justify-center gap-2 font-semibold rounded-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed";
+  const base = "inline-flex items-center justify-center gap-2 font-bold rounded-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed text-xs";
   const styles = {
-    primary: "bg-slate-900 hover:bg-black text-white px-6 py-3 shadow-sm active:scale-[0.98]",
-    blue:    "bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 shadow-sm shadow-blue-200 active:scale-[0.98]",
-    ghost:   "text-slate-500 hover:text-slate-800 px-4 py-3",
-    danger:  "p-2 text-slate-300 hover:text-red-500",
-    outline: "border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 px-4 py-2.5 text-sm",
+    primary: "bg-slate-900 hover:bg-black text-white px-5 py-2.5 shadow-sm active:scale-[0.98]",
+    blue:    "bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 shadow-md shadow-blue-600/20 active:scale-[0.98]",
+    ghost:   "text-slate-500 hover:text-slate-800 px-4 py-2.5",
+    danger:  "p-2 text-slate-300 hover:text-rose-500",
+    outline: "border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 px-4 py-2",
   };
   return (
     <button className={`${base} ${styles[variant]} ${className}`} disabled={loading} {...props}>
-      {loading ? <Loader2 size={16} className="animate-spin" /> : null}
+      {loading ? <Loader2 size={14} className="animate-spin" /> : null}
       {children}
     </button>
   );
@@ -52,38 +82,34 @@ const Btn = ({ children, variant = "primary", loading, className = "", ...props 
 const Modal = ({ open, onClose, title, icon: Icon, children, maxWidth = "max-w-lg" }) => {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-      <div className={`bg-white rounded-2xl shadow-2xl w-full ${maxWidth} flex flex-col max-h-[90vh]`}>
-        <div className="flex items-center justify-between px-5 py-4 md:px-7 md:py-5 border-b border-slate-100 flex-shrink-0">
-          <h3 className="text-base font-bold flex items-center gap-2.5 text-slate-800">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+      <div className={`bg-white rounded-3xl shadow-2xl w-full ${maxWidth} flex flex-col max-h-[90vh]`}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 flex-shrink-0">
+          <h3 className="text-base font-bold flex items-center gap-2 text-slate-800">
             {Icon && <Icon size={18} className="text-blue-600" />} {title}
           </h3>
-          <button onClick={onClose} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors">
+          <button onClick={onClose} className="p-1 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors">
             <X size={18} />
           </button>
         </div>
-        <div className="overflow-y-auto p-5 md:p-7 flex-1">{children}</div>
+        <div className="overflow-y-auto p-6 flex-1">{children}</div>
       </div>
     </div>
   );
 };
 
 const EmptyState = ({ icon: Icon, message }) => (
-  <div className="flex flex-col items-center justify-center py-14 text-slate-400 gap-3">
+  <div className="flex flex-col items-center justify-center py-12 text-slate-400 gap-2">
     <Icon size={32} className="opacity-30" />
-    <p className="text-sm text-center px-4">{message}</p>
+    <p className="text-xs text-center px-4 font-medium">{message}</p>
   </div>
 );
 
-// ─────────────────────────────────────────────
-// MAIN COMPONENT
-// ─────────────────────────────────────────────
 export default function LandingManage() {
   const [activeTab, setActiveTab] = useState("hero");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // ── DATA STATES ──────────────────────────────
   const [hero, setHero] = useState({
     id: null,
     title: "",
@@ -101,9 +127,9 @@ export default function LandingManage() {
   const [testimonials, setTestimonials] = useState([]);
   const [gallery, setGallery] = useState([]);
 
-  // ── COURSE MODAL ─────────────────────────────
+  // Modal Kursus
   const [courseModal, setCourseModal] = useState(false);
-  const [courseEditing, setCourseEditing] = useState(null); // null = new
+  const [courseEditing, setCourseEditing] = useState(null);
   const [courseForm, setCourseForm] = useState({
     title: "",
     price: "",
@@ -113,7 +139,7 @@ export default function LandingManage() {
   });
   const [courseSaving, setCourseSaving] = useState(false);
 
-  // ── TESTIMONIAL MODAL ────────────────────────
+  // Modal Testimoni
   const [testiModal, setTestiModal] = useState(false);
   const [testiEditing, setTestiEditing] = useState(null);
   const [testiForm, setTestiForm] = useState({
@@ -124,7 +150,7 @@ export default function LandingManage() {
   });
   const [testiSaving, setTestiSaving] = useState(false);
 
-  // ── GALLERY ADD MODAL ─────────────────────────
+  // Modal Galeri
   const [galleryModal, setGalleryModal] = useState(false);
   const [galleryForm, setGalleryForm] = useState({
     image_url: "",
@@ -132,14 +158,34 @@ export default function LandingManage() {
     sort_order: 0,
   });
   const [gallerySaving, setGallerySaving] = useState(false);
-
-  // NEW: State untuk 2 metode input foto gallery
-  const [galleryUploadMethod, setGalleryUploadMethod] = useState("url"); // "url" | "file"
+  const [galleryUploadMethod, setGalleryUploadMethod] = useState("url");
   const [galleryFile, setGalleryFile] = useState(null);
 
-  // ─────────────────────────────────────────────
-  // FETCH
-  // ─────────────────────────────────────────────
+  // Dialog Konfirmasi Kustom
+  const [confirmState, setConfirmState] = useState({
+    isOpen: false,
+    title: "",
+    message: "",
+    confirmLabel: "Hapus",
+    isDestructive: true,
+    onConfirm: null,
+  });
+
+  const triggerConfirm = ({ title, message, confirmLabel, isDestructive, onConfirm }) => {
+    setConfirmState({
+      isOpen: true,
+      title,
+      message,
+      confirmLabel: confirmLabel || "Hapus",
+      isDestructive: Boolean(isDestructive),
+      onConfirm,
+    });
+  };
+
+  const closeConfirm = () => {
+    setConfirmState((prev) => ({ ...prev, isOpen: false, onConfirm: null }));
+  };
+
   useEffect(() => {
     fetchAll();
   }, []);
@@ -175,9 +221,7 @@ export default function LandingManage() {
         if (heroD) setHero(heroD);
         if (aboutD) setAbout(aboutD);
         if (footerD) {
-          const [phone = "", email = ""] = (footerD.action_url || "").split(
-            "|",
-          );
+          const [phone = "", email = ""] = (footerD.action_url || "").split("|");
           setFooterContact({
             id: footerD.id,
             address: footerD.subtitle || "",
@@ -190,14 +234,11 @@ export default function LandingManage() {
       if (testiData) setTestimonials(testiData);
       if (galleryData) setGallery(galleryData);
     } catch (err) {
-      toast.error("Gagal memuat data");
+      toast.error("Gagal memuat konten halaman utama: " + err.message);
     }
     setLoading(false);
   };
 
-  // ─────────────────────────────────────────────
-  // HERO SAVE
-  // ─────────────────────────────────────────────
   const saveHero = async () => {
     setSaving(true);
     const { error } = await supabase
@@ -208,14 +249,11 @@ export default function LandingManage() {
         action_url: hero.action_url,
       })
       .eq("section", "hero");
-    if (error) toast.error("Failed to update Hero section");
-    else toast.success("Hero section updated");
+    if (error) toast.error("Gagal memperbarui bagian utama (Hero)");
+    else toast.success("Bagian utama (Hero) berhasil diperbarui");
     setSaving(false);
   };
 
-  // ─────────────────────────────────────────────
-  // ABOUT + FOOTER SAVE
-  // ─────────────────────────────────────────────
   const saveInfo = async () => {
     setSaving(true);
     const [r1, r2] = await Promise.all([
@@ -231,14 +269,12 @@ export default function LandingManage() {
         })
         .eq("section", "footer_contact"),
     ]);
-    if (r1.error || r2.error) toast.error("Failed to save info");
-    else toast.success("About & contact info saved");
+    if (r1.error || r2.error) toast.error("Gagal menyimpan informasi profil & kontak");
+    else toast.success("Informasi tentang kami dan kontak berhasil disimpan");
     setSaving(false);
   };
 
-  // ─────────────────────────────────────────────
-  // COURSES CRUD
-  // ─────────────────────────────────────────────
+  // Logika Kelola Kursus
   const openNewCourse = () => {
     setCourseEditing(null);
     setCourseForm({
@@ -250,6 +286,7 @@ export default function LandingManage() {
     });
     setCourseModal(true);
   };
+
   const openEditCourse = (course) => {
     setCourseEditing(course.id);
     setCourseForm({
@@ -261,6 +298,7 @@ export default function LandingManage() {
     });
     setCourseModal(true);
   };
+
   const saveCourse = async (e) => {
     e.preventDefault();
     setCourseSaving(true);
@@ -276,23 +314,29 @@ export default function LandingManage() {
       : await supabase.from("landing_courses").insert([payload]);
     if (error) toast.error(error.message);
     else {
-      toast.success(courseEditing ? "Course updated" : "Course added");
+      toast.success(courseEditing ? "Paket kursus diperbarui" : "Paket kursus ditambahkan");
       setCourseModal(false);
       fetchAll();
     }
     setCourseSaving(false);
   };
-  const deleteCourse = async (id) => {
-    if (!window.confirm("Delete this course?")) return;
-    const { error } = await supabase
-      .from("landing_courses")
-      .delete()
-      .eq("id", id);
-    if (error) toast.error(error.message);
-    else {
-      setCourses((prev) => prev.filter((c) => c.id !== id));
-      toast.success("Course deleted");
-    }
+
+  const deleteCourse = (id, courseTitle) => {
+    triggerConfirm({
+      title: "Hapus Paket Kursus?",
+      message: `Apakah Anda yakin ingin menghapus paket "${courseTitle || "kursus ini"}" dari halaman utama?`,
+      confirmLabel: "Hapus Kursus",
+      isDestructive: true,
+      onConfirm: async () => {
+        closeConfirm();
+        const { error } = await supabase.from("landing_courses").delete().eq("id", id);
+        if (error) toast.error("Gagal menghapus: " + error.message);
+        else {
+          setCourses((prev) => prev.filter((c) => c.id !== id));
+          toast.success("Paket kursus berhasil dihapus");
+        }
+      },
+    });
   };
 
   const addFeature = () =>
@@ -309,14 +353,13 @@ export default function LandingManage() {
       return { ...p, features: f };
     });
 
-  // ─────────────────────────────────────────────
-  // TESTIMONIALS CRUD
-  // ─────────────────────────────────────────────
+  // Logika Kelola Testimoni
   const openNewTesti = () => {
     setTestiEditing(null);
     setTestiForm({ name: "", role: "", text: "", is_published: true });
     setTestiModal(true);
   };
+
   const openEditTesti = (t) => {
     setTestiEditing(t.id);
     setTestiForm({
@@ -327,6 +370,7 @@ export default function LandingManage() {
     });
     setTestiModal(true);
   };
+
   const saveTesti = async (e) => {
     e.preventDefault();
     setTestiSaving(true);
@@ -338,42 +382,49 @@ export default function LandingManage() {
       : await supabase.from("landing_testimonials").insert([testiForm]);
     if (error) toast.error(error.message);
     else {
-      toast.success(testiEditing ? "Testimonial updated" : "Testimonial added");
+      toast.success(testiEditing ? "Ulasan berhasil diperbarui" : "Ulasan berhasil ditambahkan");
       setTestiModal(false);
       fetchAll();
     }
     setTestiSaving(false);
   };
-  const deleteTesti = async (id) => {
-    if (!window.confirm("Delete this testimonial?")) return;
-    const { error } = await supabase
-      .from("landing_testimonials")
-      .delete()
-      .eq("id", id);
-    if (error) toast.error(error.message);
-    else {
-      setTestimonials((prev) => prev.filter((t) => t.id !== id));
-      toast.success("Testimonial deleted");
-    }
+
+  const deleteTesti = (id, personName) => {
+    triggerConfirm({
+      title: "Hapus Testimoni?",
+      message: `Hapus ulasan yang diberikan oleh "${personName || "pengguna ini"}"?`,
+      confirmLabel: "Hapus Testimoni",
+      isDestructive: true,
+      onConfirm: async () => {
+        closeConfirm();
+        const { error } = await supabase.from("landing_testimonials").delete().eq("id", id);
+        if (error) toast.error("Gagal menghapus: " + error.message);
+        else {
+          setTestimonials((prev) => prev.filter((t) => t.id !== id));
+          toast.success("Ulasan berhasil dihapus");
+        }
+      },
+    });
   };
+
   const toggleTesti = async (id, current) => {
     const { error } = await supabase
       .from("landing_testimonials")
       .update({ is_published: !current })
       .eq("id", id);
     if (error) toast.error(error.message);
-    else
+    else {
       setTestimonials((prev) =>
-        prev.map((t) => (t.id === id ? { ...t, is_published: !current } : t)),
+        prev.map((t) => (t.id === id ? { ...t, is_published: !current } : t))
       );
+      toast.success(!current ? "Ulasan dipublikasikan" : "Ulasan disembunyikan");
+    }
   };
 
-  // ─────────────────────────────────────────────
-  // GALLERY CRUD DENGAN FITUR UPLOAD
-  // ─────────────────────────────────────────────
+  // Logika Kelola Galeri
   const openAddGallery = () => {
     setGalleryForm({ image_url: "", alt_text: "", sort_order: gallery.length });
-    setGalleryUploadMethod("url");
+    setGalleryUploadMethod("file");
     setGalleryFile(null);
     setGalleryModal(true);
   };
@@ -384,38 +435,34 @@ export default function LandingManage() {
 
     let finalImageUrl = galleryForm.image_url;
 
-    // Jika metode upload yang dipilih dan file ada, proses upload dulu
     if (galleryUploadMethod === "file" && galleryFile) {
       try {
         const fileExt = galleryFile.name.split(".").pop();
         const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
         const filePath = `gallery/${fileName}`;
 
-        // Upload ke bucket "images" di Supabase
         const { error: uploadError } = await supabase.storage
           .from("images")
           .upload(filePath, galleryFile);
 
         if (uploadError) throw uploadError;
 
-        // Ambil URL public
         const { data: urlData } = supabase.storage
           .from("images")
           .getPublicUrl(filePath);
 
         finalImageUrl = urlData.publicUrl;
       } catch (err) {
-        toast.error("Failed to upload image: " + err.message);
+        toast.error("Gagal mengunggah gambar: " + err.message);
         setGallerySaving(false);
         return;
       }
     } else if (galleryUploadMethod === "url" && !finalImageUrl) {
-      toast.error("Please provide an image URL");
+      toast.error("Harap masukkan tautan URL gambar.");
       setGallerySaving(false);
       return;
     }
 
-    // Insert ke tabel
     const { error } = await supabase.from("landing_gallery").insert([
       {
         image_url: finalImageUrl,
@@ -426,74 +473,73 @@ export default function LandingManage() {
 
     if (error) toast.error(error.message);
     else {
-      toast.success("Image added to gallery");
+      toast.success("Gambar berhasil ditambahkan ke galeri");
       setGalleryModal(false);
       fetchAll();
     }
     setGallerySaving(false);
   };
 
-  const deleteGallery = async (id) => {
-    if (!window.confirm("Remove this image from the gallery?")) return;
-    const { error } = await supabase
-      .from("landing_gallery")
-      .delete()
-      .eq("id", id);
-    if (error) toast.error(error.message);
-    else {
-      setGallery((prev) => prev.filter((g) => g.id !== id));
-      toast.success("Image removed");
-    }
+  const deleteGallery = (id) => {
+    triggerConfirm({
+      title: "Hapus Foto Galeri?",
+      message: "Apakah Anda yakin ingin menghapus gambar ini dari etalase galeri publik?",
+      confirmLabel: "Hapus Foto",
+      isDestructive: true,
+      onConfirm: async () => {
+        closeConfirm();
+        const { error } = await supabase.from("landing_gallery").delete().eq("id", id);
+        if (error) toast.error(error.message);
+        else {
+          setGallery((prev) => prev.filter((g) => g.id !== id));
+          toast.success("Gambar berhasil dihapus dari galeri");
+        }
+      },
+    });
   };
 
-  // ─────────────────────────────────────────────
-  // TABS CONFIG
-  // ─────────────────────────────────────────────
   const TABS = [
-    { id: "hero", label: "Hero", icon: Type },
-    { id: "info", label: "Info & Gallery", icon: ImageIcon },
-    { id: "courses", label: "Courses", icon: Layers },
-    { id: "testimonials", label: "Testimonials", icon: Star },
+    { id: "hero", label: "Bagian Utama (Hero)", icon: Type },
+    { id: "info", label: "Informasi & Galeri", icon: ImageIcon },
+    { id: "courses", label: "Paket Program", icon: Layers },
+    { id: "testimonials", label: "Ulasan / Testimoni", icon: Star },
   ];
 
-  // ─────────────────────────────────────────────
-  // RENDER
-  // ─────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-[#f8fafc] font-sans text-slate-900">
-      <Toaster
-        position="top-right"
-        toastOptions={{
-          style: { borderRadius: "12px", fontSize: "14px", fontWeight: "500" },
-        }}
+      <Toaster position="top-right" />
+
+      <CustomConfirmModal
+        isOpen={confirmState.isOpen}
+        onClose={closeConfirm}
+        onConfirm={confirmState.onConfirm}
+        title={confirmState.title}
+        message={confirmState.message}
+        confirmLabel={confirmState.confirmLabel}
+        isDestructive={confirmState.isDestructive}
       />
 
-      {/* TOP BAR */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center gap-3">
-          <div className="p-2 bg-blue-600 rounded-lg text-white">
-            <LayoutTemplate size={18} />
+          <div className="p-2 bg-blue-600 rounded-xl text-white shadow-md shadow-blue-600/20">
+            <LayoutTemplate size={20} />
           </div>
           <div className="flex-1 min-w-0">
             <h1 className="text-base font-bold leading-none truncate">
-              Manajer Halaman Arahan
+              Manajer Halaman Depan
             </h1>
             <p className="text-[11px] text-slate-400 mt-0.5 truncate">
-              Siripbiru Athletics
+              Kelola teks, galeri foto, paket renang, dan ulasan publik
             </p>
           </div>
           {loading && (
-            <Loader2
-              size={16}
-              className="text-slate-400 animate-spin flex-shrink-0"
-            />
+            <Loader2 size={16} className="text-blue-600 animate-spin flex-shrink-0" />
           )}
         </div>
       </header>
 
-      {/* TABS */}
-      <div className="bg-white border-b border-slate-200 overflow-x-auto custom-scrollbar">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 flex gap-1 min-w-max">
+      <div className="bg-white border-b border-slate-200 overflow-x-auto">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 flex gap-2 min-w-max">
           {TABS.map((tab) => {
             const Icon = tab.icon;
             const active = activeTab === tab.id;
@@ -501,234 +547,198 @@ export default function LandingManage() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-2 px-4 py-4 text-sm font-semibold border-b-2 transition-all duration-200 whitespace-nowrap ${
+                className={`flex items-center gap-2 px-4 py-3.5 text-xs sm:text-sm font-bold border-b-2 transition-all duration-200 whitespace-nowrap ${
                   active
                     ? "border-blue-600 text-blue-600"
-                    : "border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300"
+                    : "border-transparent text-slate-500 hover:text-slate-800"
                 }`}
               >
-                <Icon size={15} /> {tab.label}
+                <Icon size={16} /> {tab.label}
               </button>
             );
           })}
         </div>
       </div>
 
-      {/* MAIN */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 md:py-8">
-        {/* ── HERO TAB ── */}
+        {/* Tab Bagian Utama */}
         {activeTab === "hero" && (
           <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-            <div className="lg:col-span-3 bg-white rounded-3xl shadow-xl shadow-blue-900/5 border border-slate-100 p-5 md:p-7 space-y-5">
+            <div className="lg:col-span-3 bg-white rounded-3xl border border-slate-200 p-6 space-y-4 shadow-sm">
               <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-                <Edit3 size={16} className="text-blue-600" /> Hero Section
-                Content
+                <Edit3 size={16} className="text-blue-600" /> Konten Utama (Hero Banner)
               </h2>
-              <Field label="Main Headline">
+              <Field label="Judul Utama (Headline)">
                 <input
                   value={hero.title}
                   onChange={(e) => setHero({ ...hero, title: e.target.value })}
                   className={inputCls}
-                  placeholder="e.g. Train Like a Champion"
+                  placeholder="Contoh: Belajar Renang Profesional Bersama Kami"
                 />
               </Field>
-              <Field label="Subtitle / Tagline">
+              <Field label="Subjudul / Slogan">
                 <textarea
                   value={hero.subtitle}
-                  onChange={(e) =>
-                    setHero({ ...hero, subtitle: e.target.value })
-                  }
+                  onChange={(e) => setHero({ ...hero, subtitle: e.target.value })}
                   rows={3}
                   className={inputCls}
-                  placeholder="A short sentence describing your program's benefit..."
+                  placeholder="Deskripsi singkat manfaat klub renang bagi peserta..."
                 />
               </Field>
-              <Field label="CTA Button URL">
+              <Field label="Tautan Aksi Tombol (URL CTA)">
                 <input
                   value={hero.action_url}
-                  onChange={(e) =>
-                    setHero({ ...hero, action_url: e.target.value })
-                  }
+                  onChange={(e) => setHero({ ...hero, action_url: e.target.value })}
                   className={inputCls}
                   placeholder="https://wa.me/62..."
                 />
               </Field>
               <div className="pt-2">
                 <Btn
-                  variant="primary"
+                  variant="blue"
                   loading={saving}
                   onClick={saveHero}
                   className="w-full sm:w-auto"
                 >
-                  <Save size={15} /> Save Changes
+                  <Save size={15} /> Simpan Perubahan
                 </Btn>
               </div>
             </div>
 
-            {/* Preview Card */}
-            <div className="lg:col-span-2 bg-gradient-to-br from-blue-600 to-blue-800 rounded-3xl p-5 md:p-7 text-white flex flex-col justify-between">
+            <div className="lg:col-span-2 bg-gradient-to-br from-blue-600 to-blue-800 rounded-3xl p-6 text-white flex flex-col justify-between shadow-lg shadow-blue-600/20">
               <div>
-                <p className="text-[10px] font-bold tracking-widest opacity-60 uppercase mb-4">
-                  Live Preview
+                <p className="text-[10px] font-bold tracking-widest text-blue-200 uppercase mb-4">
+                  Pratinjau Langsung
                 </p>
-                <h2 className="text-xl md:text-2xl font-extrabold leading-tight mb-3 break-words">
-                  {hero.title || (
-                    <span className="opacity-40 italic">
-                      No headline yet...
-                    </span>
-                  )}
+                <h2 className="text-xl font-extrabold leading-tight mb-2 break-words">
+                  {hero.title || <span className="opacity-40 italic">Belum ada judul...</span>}
                 </h2>
-                <p className="text-blue-100 text-sm leading-relaxed">
-                  {hero.subtitle || (
-                    <span className="opacity-40 italic">
-                      No subtitle yet...
-                    </span>
-                  )}
+                <p className="text-blue-100 text-xs leading-relaxed">
+                  {hero.subtitle || <span className="opacity-40 italic">Belum ada subjudul...</span>}
                 </p>
               </div>
-              <div className="mt-8 border-t border-white/20 pt-5">
-                <p className="text-[11px] opacity-60 mb-2">Tip</p>
+              <div className="mt-8 border-t border-white/20 pt-4">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-blue-200 mb-1">Tips Konten</p>
                 <p className="text-blue-100 text-xs leading-relaxed">
-                  Keep headlines under 10 words. Focus on the parent's benefit,
-                  not the sport.
+                  Gunakan kalimat yang padat dan menarik minat orang tua atlet dalam membaca penawaran program.
                 </p>
               </div>
             </div>
           </div>
         )}
 
-        {/* ── INFO & GALLERY TAB ── */}
+        {/* Tab Informasi & Galeri */}
         {activeTab === "info" && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* About + Footer */}
             <div className="space-y-6">
-              <div className="bg-white rounded-3xl shadow-xl shadow-blue-900/5 border border-slate-100 p-5 md:p-7 space-y-5">
+              <div className="bg-white rounded-3xl border border-slate-200 p-6 space-y-4 shadow-sm">
                 <h2 className="text-sm font-bold text-slate-800">
-                  About Section
+                  Tentang Klub (About Section)
                 </h2>
-                <Field label="Section Title">
+                <Field label="Judul Bagian">
                   <input
                     value={about.title}
-                    onChange={(e) =>
-                      setAbout({ ...about, title: e.target.value })
-                    }
+                    onChange={(e) => setAbout({ ...about, title: e.target.value })}
                     className={inputCls}
-                    placeholder="About Us"
+                    placeholder="Tentang Kami"
                   />
                 </Field>
-                <Field label="Description">
+                <Field label="Deskripsi Pengantar">
                   <textarea
                     value={about.subtitle}
-                    onChange={(e) =>
-                      setAbout({ ...about, subtitle: e.target.value })
-                    }
+                    onChange={(e) => setAbout({ ...about, subtitle: e.target.value })}
                     rows={4}
                     className={inputCls}
-                    placeholder="Describe your organization..."
+                    placeholder="Ceritakan tentang sejarah, visi, dan pencapaian klub..."
                   />
                 </Field>
               </div>
 
-              <div className="bg-white rounded-3xl shadow-xl shadow-blue-900/5 border border-slate-100 p-5 md:p-7 space-y-5">
+              <div className="bg-white rounded-3xl border border-slate-200 p-6 space-y-4 shadow-sm">
                 <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-                  <MapPin size={15} className="text-blue-600" />
-                  Footer Contact
+                  <MapPin size={16} className="text-blue-600" /> Kontak Footer
                 </h2>
-                <Field label="Full Address">
+                <Field label="Alamat Lengkap">
                   <textarea
                     value={footerContact.address}
-                    onChange={(e) =>
-                      setFooterContact({
-                        ...footerContact,
-                        address: e.target.value,
-                      })
-                    }
+                    onChange={(e) => setFooterContact({ ...footerContact, address: e.target.value })}
                     rows={2}
                     className={inputCls}
-                    placeholder="Jl. ..."
+                    placeholder="Jl. Kolam Renang No. 1..."
                   />
                 </Field>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <Field label="Phone Number">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <Field label="Nomor WhatsApp">
                     <input
                       value={footerContact.phone}
-                      onChange={(e) =>
-                        setFooterContact({
-                          ...footerContact,
-                          phone: e.target.value,
-                        })
-                      }
+                      onChange={(e) => setFooterContact({ ...footerContact, phone: e.target.value })}
                       className={inputCls}
                       placeholder="+62..."
                     />
                   </Field>
-                  <Field label="Email">
+                  <Field label="Alamat Email">
                     <input
                       value={footerContact.email}
-                      onChange={(e) =>
-                        setFooterContact({
-                          ...footerContact,
-                          email: e.target.value,
-                        })
-                      }
+                      onChange={(e) => setFooterContact({ ...footerContact, email: e.target.value })}
                       className={inputCls}
-                      placeholder="hello@..."
+                      placeholder="admin@siripbiru.com"
                     />
                   </Field>
                 </div>
                 <Btn
-                  variant="primary"
+                  variant="blue"
                   loading={saving}
                   onClick={saveInfo}
                   className="w-full"
                 >
-                  <Save size={15} /> Save About & Contact
+                  <Save size={15} /> Simpan Profil & Kontak
                 </Btn>
               </div>
             </div>
 
-            {/* Gallery */}
-            <div className="bg-white rounded-3xl shadow-xl shadow-blue-900/5 border border-slate-100 p-5 md:p-7">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
+            <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm flex flex-col">
+              <div className="flex items-center justify-between gap-3 mb-4">
                 <h2 className="text-sm font-bold text-slate-800">
-                  Gallery Images
+                  Foto Galeri Kegiatan
                 </h2>
                 <Btn
                   variant="blue"
                   onClick={openAddGallery}
-                  className="py-2 px-4 text-xs w-full sm:w-auto"
+                  className="py-2 px-3 text-xs"
                 >
-                  <Plus size={14} /> Add Image
+                  <Plus size={14} /> Tambah Foto
                 </Btn>
               </div>
+
               {gallery.length === 0 ? (
                 <EmptyState
                   icon={ImageIcon}
-                  message="No gallery images yet. Add one to get started."
+                  message="Belum ada foto galeri. Tambahkan foto kegiatan latihan klub."
                 />
               ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 overflow-y-auto max-h-[500px] p-1">
                   {gallery.map((img) => (
                     <div
                       key={img.id}
-                      className="relative group rounded-xl overflow-hidden aspect-[4/3] bg-slate-100 border border-slate-200"
+                      className="relative group rounded-xl overflow-hidden aspect-[4/3] bg-slate-100 border border-slate-200 shadow-sm"
                     >
                       <img
                         src={img.image_url}
-                        alt={img.alt_text || "Gallery"}
+                        alt={img.alt_text || "Galeri"}
                         className="w-full h-full object-cover"
                       />
-                      <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2">
+                      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1.5 p-2">
                         {img.alt_text && (
-                          <p className="text-white text-xs font-medium px-2 text-center line-clamp-2">
+                          <p className="text-white text-[11px] font-medium text-center line-clamp-2">
                             {img.alt_text}
                           </p>
                         )}
                         <button
                           onClick={() => deleteGallery(img.id)}
-                          className="p-2 bg-red-500 text-white rounded-full hover:bg-red-600"
+                          className="p-2 bg-rose-600 text-white rounded-full hover:bg-rose-700 shadow-md active:scale-95"
+                          title="Hapus foto"
                         >
-                          <Trash2 size={14} />
+                          <Trash2 size={13} />
                         </button>
                       </div>
                     </div>
@@ -739,33 +749,28 @@ export default function LandingManage() {
           </div>
         )}
 
-        {/* ── COURSES TAB ── */}
+        {/* Tab Paket Program */}
         {activeTab === "courses" && (
           <div>
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
               <div>
                 <h2 className="text-base font-bold text-slate-800">
-                  Course Programs
+                  Daftar Program Latihan
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  {courses.length} program{courses.length !== 1 ? "s" : ""}{" "}
-                  listed
+                  Menampilkan {courses.length} paket latihan pada halaman arahan
                 </p>
               </div>
-              <Btn
-                variant="blue"
-                onClick={openNewCourse}
-                className="w-full sm:w-auto"
-              >
-                <Plus size={16} /> Add Course
+              <Btn variant="blue" onClick={openNewCourse}>
+                <Plus size={16} /> Buat Paket Baru
               </Btn>
             </div>
 
             {courses.length === 0 ? (
-              <div className="bg-white rounded-3xl shadow-xl shadow-blue-900/5 border border-slate-100 p-8">
+              <div className="bg-white rounded-3xl border border-slate-200 p-8 shadow-sm">
                 <EmptyState
                   icon={Layers}
-                  message="No courses yet. Create your first program."
+                  message="Belum ada paket program latihan. Tambahkan paket pertama Anda."
                 />
               </div>
             ) : (
@@ -775,55 +780,45 @@ export default function LandingManage() {
                   return (
                     <div
                       key={course.id}
-                      className="bg-white rounded-3xl shadow-xl shadow-blue-900/5 border border-slate-100 p-5 md:p-6 flex flex-col hover:-translate-y-1 transition-all duration-300"
+                      className="bg-white rounded-2xl border border-slate-200 p-5 flex flex-col shadow-sm hover:shadow-md transition-shadow"
                     >
-                      <div className="flex items-start justify-between mb-4">
-                        <div className="w-12 h-12 flex items-center justify-center bg-blue-50 rounded-2xl text-blue-600">
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="w-10 h-10 flex items-center justify-center bg-blue-50 rounded-xl text-blue-600">
                           <Icon size={20} />
                         </div>
                         <button
-                          onClick={() => deleteCourse(course.id)}
-                          className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors"
+                          onClick={() => deleteCourse(course.id, course.title)}
+                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                          title="Hapus paket"
                         >
                           <Trash2 size={16} />
                         </button>
                       </div>
-                      <h3 className="font-bold text-slate-800 mb-1">
+                      <h3 className="font-bold text-slate-800 text-sm mb-1">
                         {course.title}
                       </h3>
-                      <p className="text-blue-600 font-semibold text-sm mb-2">
+                      <p className="text-blue-600 font-bold text-xs mb-2">
                         {course.price}
                       </p>
                       <p className="text-xs text-slate-500 mb-4 line-clamp-2 flex-1">
                         {course.description}
                       </p>
                       {course.features?.length > 0 && (
-                        <ul className="mb-6 space-y-2">
+                        <ul className="mb-5 space-y-1.5 border-t border-slate-100 pt-3">
                           {course.features.slice(0, 3).map((f, i) => (
-                            <li
-                              key={i}
-                              className="flex items-start gap-2 text-xs text-slate-600"
-                            >
-                              <CheckCircle2
-                                size={14}
-                                className="text-emerald-500 flex-shrink-0"
-                              />{" "}
-                              {f}
+                            <li key={i} className="flex items-center gap-1.5 text-xs text-slate-600">
+                              <CheckCircle2 size={13} className="text-emerald-500 flex-shrink-0" />
+                              <span className="truncate">{f}</span>
                             </li>
                           ))}
-                          {course.features.length > 3 && (
-                            <li className="text-xs text-slate-400 pl-6">
-                              +{course.features.length - 3} more
-                            </li>
-                          )}
                         </ul>
                       )}
                       <Btn
                         variant="outline"
                         onClick={() => openEditCourse(course)}
-                        className="w-full mt-auto py-3 rounded-2xl"
+                        className="w-full mt-auto"
                       >
-                        <Edit3 size={14} /> Edit Details
+                        <Edit3 size={13} /> Ubah Rincian
                       </Btn>
                     </div>
                   );
@@ -833,94 +828,74 @@ export default function LandingManage() {
           </div>
         )}
 
-        {/* ── TESTIMONIALS TAB ── */}
+        {/* Tab Ulasan Testimoni */}
         {activeTab === "testimonials" && (
           <div>
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
               <div>
                 <h2 className="text-base font-bold text-slate-800">
-                  Testimonials
+                  Ulasan & Testimoni
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  {testimonials.filter((t) => t.is_published).length} published
-                  · {testimonials.filter((t) => !t.is_published).length} draft
+                  {testimonials.filter((t) => t.is_published).length} dipublikasikan • {testimonials.filter((t) => !t.is_published).length} konsep
                 </p>
               </div>
-              <Btn
-                variant="blue"
-                onClick={openNewTesti}
-                className="w-full sm:w-auto"
-              >
-                <Plus size={16} /> Add Testimonial
+              <Btn variant="blue" onClick={openNewTesti}>
+                <Plus size={16} /> Tambah Testimoni
               </Btn>
             </div>
 
-            <div className="bg-white rounded-3xl shadow-xl shadow-blue-900/5 border border-slate-100 overflow-hidden">
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
               {testimonials.length === 0 ? (
-                <EmptyState icon={Star} message="No testimonials yet." />
+                <EmptyState icon={Star} message="Belum ada testimoni yang ditambahkan." />
               ) : (
                 <div className="divide-y divide-slate-100">
                   {testimonials.map((t) => (
                     <div
                       key={t.id}
-                      className="flex flex-col sm:flex-row sm:items-start gap-4 px-6 py-5 hover:bg-slate-50/50 transition-colors"
+                      className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 hover:bg-slate-50/50"
                     >
-                      {/* Avatar */}
-                      <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold text-sm flex-shrink-0">
-                        {t.name?.[0]?.toUpperCase() || "?"}
-                      </div>
-
-                      {/* Content */}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="font-bold text-sm text-slate-800">
-                            {t.name}
-                          </span>
-                          <span className="text-xs text-slate-400">·</span>
-                          <span className="text-xs text-slate-400 font-medium truncate">
-                            {t.role}
-                          </span>
+                      <div className="flex items-start gap-3">
+                        <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center font-bold text-xs shrink-0">
+                          {t.name?.[0]?.toUpperCase() || "?"}
                         </div>
-                        <p className="text-sm text-slate-600 italic line-clamp-2 md:line-clamp-none">
-                          "{t.text}"
-                        </p>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-xs sm:text-sm text-slate-800">{t.name}</span>
+                            <span className="text-slate-400 text-xs">•</span>
+                            <span className="text-slate-400 text-xs font-medium">{t.role}</span>
+                          </div>
+                          <p className="text-xs text-slate-600 italic mt-0.5">
+                            "{t.text}"
+                          </p>
+                        </div>
                       </div>
 
-                      {/* Status + Actions */}
-                      <div className="flex items-center gap-2 sm:flex-shrink-0 mt-3 sm:mt-0 ml-16 sm:ml-0">
+                      <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
                         <button
                           onClick={() => toggleTesti(t.id, t.is_published)}
-                          title={
+                          className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase border flex items-center gap-1.5 transition-colors ${
                             t.is_published
-                              ? "Klik untuk tidak dipublikasikan"
-                              : "Klik untuk dipublikasikan"
-                          }
-                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wide transition-all ${
-                            t.is_published
-                              ? "bg-emerald-50 text-emerald-600 border border-emerald-200 hover:bg-emerald-600 hover:text-white"
-                              : "bg-slate-50 text-slate-500 border border-slate-200 hover:bg-emerald-500 hover:text-white"
+                              ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
+                              : "bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200"
                           }`}
                         >
-                          {t.is_published ? (
-                            <Eye size={12} />
-                          ) : (
-                            <EyeOff size={12} />
-                          )}
-                          <span className="hidden xs:inline">
-                            {t.is_published ? "Published" : "Draft"}
-                          </span>
+                          {t.is_published ? <Eye size={12} /> : <EyeOff size={12} />}
+                          {t.is_published ? "Tayang" : "Disimpan"}
                         </button>
                         <button
                           onClick={() => openEditTesti(t)}
-                          className="p-2 text-slate-400 hover:text-blue-600 transition-colors rounded-xl hover:bg-blue-50"
+                          className="p-1.5 text-slate-500 hover:text-blue-600 rounded-lg"
+                          title="Ubah ulasan"
                         >
-                          <Edit3 size={16} />
+                          <Edit3 size={15} />
                         </button>
                         <button
-                          onClick={() => deleteTesti(t.id)}
-                          className="p-2 text-slate-400 hover:text-red-500 transition-colors rounded-xl hover:bg-red-50"
+                          onClick={() => deleteTesti(t.id, t.name)}
+                          className="p-1.5 text-slate-500 hover:text-rose-600 rounded-lg"
+                          title="Hapus ulasan"
                         >
-                          <Trash2 size={16} />
+                          <Trash2 size={15} />
                         </button>
                       </div>
                     </div>
@@ -932,50 +907,38 @@ export default function LandingManage() {
         )}
       </main>
 
-      {/* ══════════════════════════════════════════ */}
-      {/* MODALS                                     */}
-      {/* ══════════════════════════════════════════ */}
-
-      {/* COURSE MODAL */}
+      {/* Modal Paket Kursus */}
       <Modal
         open={courseModal}
         onClose={() => setCourseModal(false)}
-        title={courseEditing ? "Edit Course" : "New Course"}
+        title={courseEditing ? "Ubah Paket Program" : "Paket Program Baru"}
         icon={Layers}
-        maxWidth="max-w-2xl"
+        maxWidth="max-w-xl"
       >
-        <form onSubmit={saveCourse} className="space-y-5">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="md:col-span-2">
-              <Field label="Course Name">
-                <input
-                  required
-                  value={courseForm.title}
-                  onChange={(e) =>
-                    setCourseForm({ ...courseForm, title: e.target.value })
-                  }
-                  className={inputCls}
-                  placeholder="e.g. Beginner Swimming"
-                />
-              </Field>
-            </div>
-            <Field label="Price / Label">
+        <form onSubmit={saveCourse} className="space-y-4">
+          <Field label="Nama Paket Kursus">
+            <input
+              required
+              value={courseForm.title}
+              onChange={(e) => setCourseForm({ ...courseForm, title: e.target.value })}
+              className={inputCls}
+              placeholder="Contoh: Kelas Pemula Anak"
+            />
+          </Field>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label="Label Harga / Periode">
               <input
                 required
                 value={courseForm.price}
-                onChange={(e) =>
-                  setCourseForm({ ...courseForm, price: e.target.value })
-                }
+                onChange={(e) => setCourseForm({ ...courseForm, price: e.target.value })}
                 className={inputCls}
-                placeholder="mis. Rp 350.000/bulan"
+                placeholder="Contoh: Rp 350.000 / Bulan"
               />
             </Field>
-            <Field label="Icon">
+            <Field label="Ikon Penanda">
               <select
                 value={courseForm.icon_name}
-                onChange={(e) =>
-                  setCourseForm({ ...courseForm, icon_name: e.target.value })
-                }
+                onChange={(e) => setCourseForm({ ...courseForm, icon_name: e.target.value })}
                 className={inputCls}
               >
                 {ICON_OPTIONS.map((o) => (
@@ -985,57 +948,50 @@ export default function LandingManage() {
                 ))}
               </select>
             </Field>
-            <div className="md:col-span-2">
-              <Field label="Deskripsi Singkat">
-                <textarea
-                  required
-                  rows={2}
-                  value={courseForm.description}
-                  onChange={(e) =>
-                    setCourseForm({
-                      ...courseForm,
-                      description: e.target.value,
-                    })
-                  }
-                  className={inputCls}
-                  placeholder="Describe this course in 1-2 sentences..."
-                />
-              </Field>
-            </div>
           </div>
+          <Field label="Deskripsi Singkat">
+            <textarea
+              required
+              rows={2}
+              value={courseForm.description}
+              onChange={(e) => setCourseForm({ ...courseForm, description: e.target.value })}
+              className={inputCls}
+              placeholder="Tuliskan sasaran dan ringkasan pelatihan..."
+            />
+          </Field>
 
-          <div className="border-t border-slate-100 pt-5">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-[10px] font-bold tracking-[0.12em] uppercase text-slate-400">
-                Features / Bullet Points
+          <div className="border-t border-slate-100 pt-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                Poin Keunggulan / Fasilitas
               </span>
               <button
                 type="button"
                 onClick={addFeature}
-                className="text-xs font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                className="text-xs font-bold text-blue-600 hover:underline flex items-center gap-1"
               >
-                <Plus size={13} /> Add Feature
+                <Plus size={12} /> Tambah Fasilitas
               </button>
             </div>
-            <div className="space-y-2.5">
+            <div className="space-y-2">
               {courseForm.features.map((feature, i) => (
                 <div key={i} className="flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-full bg-blue-50 text-blue-600 text-[10px] font-black flex items-center justify-center flex-shrink-0">
+                  <span className="w-5 h-5 rounded-full bg-slate-100 text-slate-500 text-[10px] font-bold flex items-center justify-center shrink-0">
                     {i + 1}
                   </span>
                   <input
                     value={feature}
                     onChange={(e) => changeFeature(i, e.target.value)}
                     className={`${inputCls} flex-1`}
-                    placeholder={`Feature ${i + 1}...`}
+                    placeholder={`Poin fasilitas ${i + 1}...`}
                   />
                   {courseForm.features.length > 1 && (
                     <button
                       type="button"
                       onClick={() => removeFeature(i)}
-                      className="text-slate-300 hover:text-red-500 transition-colors p-2 bg-slate-50 hover:bg-red-50 rounded-xl"
+                      className="p-1 text-slate-400 hover:text-rose-600"
                     >
-                      <MinusCircle size={18} />
+                      <MinusCircle size={16} />
                     </button>
                   )}
                 </div>
@@ -1043,230 +999,151 @@ export default function LandingManage() {
             </div>
           </div>
 
-          <div className="flex flex-col sm:flex-row justify-end gap-3 pt-4 border-t border-slate-100">
-            <Btn
-              type="button"
-              variant="ghost"
-              onClick={() => setCourseModal(false)}
-              className="w-full sm:w-auto"
-            >
-              Cancel
+          <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+            <Btn type="button" variant="ghost" onClick={() => setCourseModal(false)}>
+              Batal
             </Btn>
-            <Btn
-              type="submit"
-              variant="blue"
-              loading={courseSaving}
-              className="w-full sm:w-auto"
-            >
-              <Save size={15} /> {courseEditing ? "Save Changes" : "Add Course"}
+            <Btn type="submit" variant="blue" loading={courseSaving}>
+              <Save size={14} /> {courseEditing ? "Simpan Perubahan" : "Simpan Paket"}
             </Btn>
           </div>
         </form>
       </Modal>
 
-      {/* TESTIMONIAL MODAL */}
+      {/* Modal Testimoni */}
       <Modal
         open={testiModal}
         onClose={() => setTestiModal(false)}
-        title={testiEditing ? "Edit Testimonial" : "New Testimonial"}
+        title={testiEditing ? "Ubah Testimoni" : "Tambah Testimoni"}
         icon={Star}
       >
-        <form onSubmit={saveTesti} className="space-y-4">
-          <Field label="Sender Name">
+        <form onSubmit={saveTesti} className="space-y-3 text-xs">
+          <Field label="Nama Pengirim">
             <input
               required
               value={testiForm.name}
-              onChange={(e) =>
-                setTestiForm({ ...testiForm, name: e.target.value })
-              }
+              onChange={(e) => setTestiForm({ ...testiForm, name: e.target.value })}
               className={inputCls}
-              placeholder="Full name"
+              placeholder="Nama lengkap wali / atlet"
             />
           </Field>
-          <Field label="Role / Title">
+          <Field label="Peran / Gelar">
             <input
               required
               value={testiForm.role}
-              onChange={(e) =>
-                setTestiForm({ ...testiForm, role: e.target.value })
-              }
+              onChange={(e) => setTestiForm({ ...testiForm, role: e.target.value })}
               className={inputCls}
-              placeholder="e.g. Parent of Athlete"
+              placeholder="Contoh: Orang Tua Atlet Pemula"
             />
           </Field>
-          <Field label="Testimonial Text">
+          <Field label="Isi Pesan / Testimoni">
             <textarea
               required
-              rows={4}
+              rows={3}
               value={testiForm.text}
-              onChange={(e) =>
-                setTestiForm({ ...testiForm, text: e.target.value })
-              }
+              onChange={(e) => setTestiForm({ ...testiForm, text: e.target.value })}
               className={`${inputCls} resize-none`}
-              placeholder="What did they say about the program?"
+              placeholder="Pendapat atau ulasan selama mengikuti klub..."
             />
           </Field>
-          <div className="flex items-center gap-3 bg-slate-50 border border-slate-100 rounded-xl px-4 py-3">
+          <label className="flex items-center gap-2 p-2.5 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer">
             <input
               type="checkbox"
-              id="testi-published"
               checked={testiForm.is_published}
-              onChange={(e) =>
-                setTestiForm({ ...testiForm, is_published: e.target.checked })
-              }
-              className="w-4 h-4 accent-blue-600 cursor-pointer flex-shrink-0"
+              onChange={(e) => setTestiForm({ ...testiForm, is_published: e.target.checked })}
+              className="w-4 h-4 text-blue-600 rounded"
             />
-            <label
-              htmlFor="testi-published"
-              className="text-sm text-slate-700 font-medium cursor-pointer select-none"
-            >
-              Publish immediately
-            </label>
-          </div>
-          <div className="flex flex-col sm:flex-row justify-end gap-3 pt-4 border-t border-slate-100">
-            <Btn
-              type="button"
-              variant="ghost"
-              onClick={() => setTestiModal(false)}
-              className="w-full sm:w-auto"
-            >
-              Cancel
+            <span className="font-bold text-slate-700">Publikasikan langsung ke halaman depan</span>
+          </label>
+
+          <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+            <Btn type="button" variant="ghost" onClick={() => setTestiModal(false)}>
+              Batal
             </Btn>
-            <Btn
-              type="submit"
-              variant="blue"
-              loading={testiSaving}
-              className="w-full sm:w-auto"
-            >
-              <Save size={15} />{" "}
-              {testiEditing ? "Save Changes" : "Add Testimonial"}
+            <Btn type="submit" variant="blue" loading={testiSaving}>
+              <Save size={14} /> {testiEditing ? "Simpan Perubahan" : "Simpan Testimoni"}
             </Btn>
           </div>
         </form>
       </Modal>
 
-      {/* GALLERY ADD MODAL - DIPERBARUI */}
+      {/* Modal Galeri Foto */}
       <Modal
         open={galleryModal}
         onClose={() => setGalleryModal(false)}
-        title="Add Gallery Image"
+        title="Tambah Foto Galeri"
         icon={ImageIcon}
       >
-        <form onSubmit={saveGallery} className="space-y-5">
-          {/* Opsi Toggle (Radio) untuk Metode Upload */}
-          <div className="flex gap-6 mb-2">
-            <label className="flex items-center gap-2 text-sm text-slate-700 font-bold cursor-pointer">
+        <form onSubmit={saveGallery} className="space-y-4 text-xs">
+          <div className="flex gap-4">
+            <label className="flex items-center gap-1.5 font-bold text-slate-700 cursor-pointer">
               <input
                 type="radio"
-                name="upload_method"
-                className="w-4 h-4 accent-blue-600"
-                checked={galleryUploadMethod === "url"}
-                onChange={() => setGalleryUploadMethod("url")}
-              />
-              Link / URL
-            </label>
-            <label className="flex items-center gap-2 text-sm text-slate-700 font-bold cursor-pointer">
-              <input
-                type="radio"
-                name="upload_method"
-                className="w-4 h-4 accent-blue-600"
+                name="gallery_opt"
                 checked={galleryUploadMethod === "file"}
                 onChange={() => setGalleryUploadMethod("file")}
+                className="w-4 h-4 text-blue-600"
               />
-              Upload File
+              Unggah File
+            </label>
+            <label className="flex items-center gap-1.5 font-bold text-slate-700 cursor-pointer">
+              <input
+                type="radio"
+                name="gallery_opt"
+                checked={galleryUploadMethod === "url"}
+                onChange={() => setGalleryUploadMethod("url")}
+                className="w-4 h-4 text-blue-600"
+              />
+              Tautan URL
             </label>
           </div>
 
-          {/* Render Input Dinamis */}
-          {galleryUploadMethod === "url" ? (
-            <Field label="Image URL">
-              <input
-                required
-                value={galleryForm.image_url}
-                onChange={(e) =>
-                  setGalleryForm({ ...galleryForm, image_url: e.target.value })
-                }
-                className={inputCls}
-                placeholder="https://..."
-              />
-            </Field>
-          ) : (
+          {galleryUploadMethod === "file" ? (
             <Field label="Pilih Gambar dari Perangkat">
               <input
                 type="file"
                 accept="image/*"
                 required
                 onChange={(e) => setGalleryFile(e.target.files[0])}
-                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-600 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-600 file:mr-3 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-blue-50 file:text-blue-700"
+              />
+            </Field>
+          ) : (
+            <Field label="Tautan URL Gambar">
+              <input
+                required
+                value={galleryForm.image_url}
+                onChange={(e) => setGalleryForm({ ...galleryForm, image_url: e.target.value })}
+                className={inputCls}
+                placeholder="https://domain.com/foto-latihan.jpg"
               />
             </Field>
           )}
 
-          {/* Preview Gambar Dinamis */}
-          {galleryUploadMethod === "url" && galleryForm.image_url && (
-            <div className="rounded-xl overflow-hidden aspect-video bg-slate-100 border border-slate-200 shadow-sm relative">
-              <img
-                src={galleryForm.image_url}
-                alt="preview"
-                className="w-full h-full object-cover"
-                onError={(e) => {
-                  e.target.style.display = "none";
-                }}
-              />
-            </div>
-          )}
-
-          {galleryUploadMethod === "file" && galleryFile && (
-            <div className="rounded-xl overflow-hidden aspect-video bg-slate-100 border border-slate-200 shadow-sm relative">
-              <img
-                src={URL.createObjectURL(galleryFile)}
-                alt="preview file"
-                className="w-full h-full object-cover"
-              />
-            </div>
-          )}
-
-          <Field label="Alt Text (optional)">
+          <Field label="Keterangan Foto (Opsional)">
             <input
               value={galleryForm.alt_text}
-              onChange={(e) =>
-                setGalleryForm({ ...galleryForm, alt_text: e.target.value })
-              }
+              onChange={(e) => setGalleryForm({ ...galleryForm, alt_text: e.target.value })}
               className={inputCls}
-              placeholder="Describe the image for accessibility..."
+              placeholder="Contoh: Latihan teknik renang gaya dada"
             />
           </Field>
-          <Field label="Sort Order">
+          <Field label="Nomor Urutan Tampil">
             <input
               type="number"
+              min="0"
               value={galleryForm.sort_order}
-              onChange={(e) =>
-                setGalleryForm({
-                  ...galleryForm,
-                  sort_order: parseInt(e.target.value) || 0,
-                })
-              }
+              onChange={(e) => setGalleryForm({ ...galleryForm, sort_order: parseInt(e.target.value, 10) || 0 })}
               className={inputCls}
-              min={0}
             />
           </Field>
 
-          <div className="flex flex-col sm:flex-row justify-end gap-3 pt-4 border-t border-slate-100">
-            <Btn
-              type="button"
-              variant="ghost"
-              onClick={() => setGalleryModal(false)}
-              className="w-full sm:w-auto"
-            >
-              Cancel
+          <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+            <Btn type="button" variant="ghost" onClick={() => setGalleryModal(false)}>
+              Batal
             </Btn>
-            <Btn
-              type="submit"
-              variant="blue"
-              loading={gallerySaving}
-              className="w-full sm:w-auto"
-            >
-              <Plus size={15} /> Add to Gallery
+            <Btn type="submit" variant="blue" loading={gallerySaving}>
+              <Plus size={14} /> Tambahkan ke Galeri
             </Btn>
           </div>
         </form>

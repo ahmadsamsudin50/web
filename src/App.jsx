@@ -6,7 +6,8 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import AuthGuard from './components/AuthGuard';
 import LayoutAdmin from './components/LayoutAdmin';
-import LayoutStudent from './components/LayoutStudent';
+import LayoutStudent from './pages/student/Profile'; // Tergantung struktur import Anda, pastikan path benar
+import LayoutStudentComponent from './components/LayoutStudent';
 import LayoutCoach from "./components/LayoutCoach";
 
 // Halaman Admin
@@ -15,15 +16,16 @@ import LandingManage from './pages/admin/LandingManage';
 import ClassManage from './pages/admin/ClassManage';
 import StudentManage from './pages/admin/StudentManage';
 import CoachManage from "./pages/admin/CoachManage";
-import Payments from './pages/admin/Payments'; // <-- IMPORT BARU
+import Payments from './pages/admin/Payments';
 import SessionManage from './pages/admin/SessionManage';
 import ScanQR from './pages/admin/ScanQR';
 import ManualEntry from './pages/admin/ManualEntry';
 import Recap from './pages/admin/Recap';
+import AnnouncementManage from './pages/admin/AnnouncementManage'; // <-- IMPORT BARU
 
 // Halaman Student
 import Profile from './pages/student/Profile';
-import Enrollment from './pages/student/Enrollment'; // <-- IMPORT BARU
+import Enrollment from './pages/student/Enrollment';
 import History from './pages/student/History';
 import Schedule from "./pages/student/Schedule";
 
@@ -56,11 +58,12 @@ function App() {
           <Route path="classes" element={<ClassManage />} />
           <Route path="students" element={<StudentManage />} />
           <Route path="coaches" element={<CoachManage />} />
-          <Route path="payments" element={<Payments />} /> {/* <-- ROUTE BARU */}
+          <Route path="payments" element={<Payments />} />
           <Route path="sessions" element={<SessionManage />} />
           <Route path="scan" element={<ScanQR />} />
           <Route path="manual-entry" element={<ManualEntry />} />
           <Route path="recap" element={<Recap />} />
+          <Route path="announcements" element={<AnnouncementManage />} /> {/* <-- ROUTE BARU */}
         </Route>
 
         {/* ============================================== */}
@@ -70,12 +73,12 @@ function App() {
           path="/student"
           element={
             <AuthGuard allowedRole="student">
-              <LayoutStudent />
+              <LayoutStudentComponent />
             </AuthGuard>
           }
         >
           <Route index element={<Profile />} />
-          <Route path="enroll" element={<Enrollment />} /> {/* <-- ROUTE BARU */}
+          <Route path="enroll" element={<Enrollment />} />
           <Route path="history" element={<History />} />
           <Route path="schedule" element={<Schedule />} />
         </Route>

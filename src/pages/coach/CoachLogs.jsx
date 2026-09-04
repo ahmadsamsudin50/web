@@ -4,7 +4,6 @@ import { toast, Toaster } from "react-hot-toast";
 import {
   ClipboardList,
   Search,
-  Filter,
   CalendarDays,
   Clock,
   ChevronLeft,
@@ -16,13 +15,11 @@ import {
 export default function CoachLogs() {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
-
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [sortOrder, setSortOrder] = useState("desc");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
-  
   const [currentPage, setCurrentPage] = useState(1);
   const ITEMS_PER_PAGE = 10;
 
@@ -31,7 +28,7 @@ export default function CoachLogs() {
       setLoading(true);
       try {
         const savedUser = localStorage.getItem("user_session");
-        if (!savedUser) throw new Error("Session expired.");
+        if (!savedUser) throw new Error("Sesi berakhir. Silakan masuk kembali.");
         const user = JSON.parse(savedUser);
 
         const { data: coachData, error: coachError } = await supabase
@@ -40,29 +37,25 @@ export default function CoachLogs() {
           .eq("user_id", user.id)
           .single();
 
-        if (coachError || !coachData)
-          throw new Error("Coach profile not found.");
+        if (coachError || !coachData) throw new Error("Profil instruktur tidak ditemukan.");
 
         const { data, error } = await supabase
           .from("attendance_logs")
-          .select(
-            `
+          .select(`
             id, status, scanned_at,
             sessions ( name, session_date )
-          `,
-          )
+          `)
           .eq("coach_id", coachData.id)
           .order("scanned_at", { ascending: false });
 
         if (error) throw error;
         setLogs(data || []);
       } catch (err) {
-        toast.error("Gagal memuat catatan: " + err.message);
+        toast.error("Gagal memuat catatan kehadiran: " + err.message);
       } finally {
         setLoading(false);
       }
     };
-
     fetchLogs();
   }, []);
 
@@ -71,11 +64,10 @@ export default function CoachLogs() {
   }, [searchQuery, filterStatus, sortOrder, dateFrom, dateTo]);
 
   let processedLogs = [...logs];
-
   if (searchQuery) {
     const query = searchQuery.toLowerCase();
     processedLogs = processedLogs.filter((log) =>
-      log.sessions?.name?.toLowerCase().includes(query),
+      log.sessions?.name?.toLowerCase().includes(query)
     );
   }
 
@@ -83,15 +75,15 @@ export default function CoachLogs() {
     processedLogs = processedLogs.filter((log) => log.status === filterStatus);
   }
 
-  if (dateFrom) {
+  if (dateFrom && dateFrom.trim() !== "") {
     processedLogs = processedLogs.filter(
-      (log) => new Date(log.scanned_at) >= new Date(dateFrom + "T00:00:00"),
+      (log) => new Date(log.scanned_at) >= new Date(dateFrom + "T00:00:00")
     );
   }
 
-  if (dateTo) {
+  if (dateTo && dateTo.trim() !== "") {
     processedLogs = processedLogs.filter(
-      (log) => new Date(log.scanned_at) <= new Date(dateTo + "T23:59:59"),
+      (log) => new Date(log.scanned_at) <= new Date(dateTo + "T23:59:59")
     );
   }
 
@@ -104,25 +96,27 @@ export default function CoachLogs() {
   const totalPages = Math.ceil(processedLogs.length / ITEMS_PER_PAGE);
   const paginatedLogs = processedLogs.slice(
     (currentPage - 1) * ITEMS_PER_PAGE,
-    currentPage * ITEMS_PER_PAGE,
+    currentPage * ITEMS_PER_PAGE
   );
 
-  const getStatusStyle = (status) => {
-    if (status.includes("hadir"))
-      return "bg-emerald-100 text-emerald-700 border-emerald-200";
-    if (status === "izin")
-      return "bg-amber-100 text-amber-700 border-amber-200";
-    if (status === "sakit") return "bg-red-100 text-red-700 border-red-200";
-    return "bg-slate-100 text-slate-700 border-slate-200";
+  const getStatusBadgeStyle = (status) => {
+    if (!status) return "bg-slate-100 text-slate-600 border-slate-300";
+    const s = status.toLowerCase();
+    if (s.includes("hadir_qr")) return "bg-emerald-500 text-white border-emerald-600 shadow-sm";
+    if (s.includes("hadir_manual")) return "bg-teal-500 text-white border-teal-600 shadow-sm";
+    if (s.includes("izin")) return "bg-blue-500 text-white border-blue-600 shadow-sm";
+    if (s.includes("sakit")) return "bg-amber-400 text-amber-950 border-amber-500 shadow-sm";
+    if (s.includes("alpa")) return "bg-rose-600 text-white border-rose-700 shadow-sm";
+    return "bg-slate-200 text-slate-700 border-slate-300";
   };
 
-  const hasActiveFilters =
-    searchQuery || filterStatus !== "all" || dateFrom || dateTo;
-  const clearAllFilters = () => {
-    setSearchQuery("");
-    setFilterStatus("all");
-    setDateFrom("");
-    setDateTo("");
+  const getStatusLabel = (status) => {
+    if (status === "hadir_qr") return "Hadir (QR)";
+    if (status === "hadir_manual") return "Hadir (Manual)";
+    if (status === "izin") return "Izin";
+    if (status === "sakit") return "Sakit";
+    if (status === "alpa") return "Alpa";
+    return status ? status.replace("_", " ") : "-";
   };
 
   const totalPresent = logs.filter((l) => l.status.includes("hadir")).length;
@@ -130,273 +124,188 @@ export default function CoachLogs() {
   const totalSick = logs.filter((l) => l.status === "sakit").length;
   const totalAbsent = logs.filter((l) => l.status === "alpa").length;
 
+  const hasActiveFilters = searchQuery || filterStatus !== "all" || dateFrom || dateTo;
+  const clearFilters = () => {
+    setSearchQuery("");
+    setFilterStatus("all");
+    setDateFrom("");
+    setDateTo("");
+  };
+
   if (loading) {
     return (
-      <div className="min-h-[70vh] flex flex-col items-center justify-center">
-        <div className="w-12 h-12 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-4"></div>
-        <p className="text-slate-500 font-medium animate-pulse">
-          Memuat catatan kehadiran...
-        </p>
+      <div className="min-h-[70vh] flex flex-col items-center justify-center font-sans">
+        <div className="w-10 h-10 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-3"></div>
+        <p className="text-slate-500 text-sm font-medium animate-pulse">Memuat log kehadiran...</p>
       </div>
     );
   }
 
   return (
     <div className="min-h-screen bg-[#f8fafc] p-4 md:p-8 font-sans">
-      <Toaster
-        position="top-right"
-        toastOptions={{ style: { borderRadius: "16px", fontWeight: "500" } }}
-      />
-
-      {/* Header */}
-      <div className="max-w-7xl mx-auto mb-8">
-        <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight flex items-center gap-3">
-          <ClipboardList className="text-blue-600" size={32} />
-          Attendance Logs
+      <Toaster position="top-right" />
+      <div className="max-w-7xl mx-auto mb-6">
+        <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight flex items-center gap-3">
+          <ClipboardList className="text-blue-600" size={28} />
+          Catatan Kehadiran Instruktur
         </h1>
         <p className="text-slate-500 mt-1 text-sm">
-          Your personal attendance history across all training sessions.
+          Riwayat absensi dan rekaman penugasan melatih Anda.
         </p>
       </div>
 
-      {/* Summary Cards */}
-      <div className="max-w-7xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+      <div className="max-w-7xl mx-auto grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
         {[
-          { label: "Present", value: totalPresent, color: "text-emerald-600" },
-          { label: "Excused", value: totalExcused, color: "text-amber-600" },
-          { label: "Sick", value: totalSick, color: "text-red-500" },
-          { label: "Absent", value: totalAbsent, color: "text-slate-500" },
+          { label: "Hadir", value: totalPresent, color: "text-emerald-600", bg: "bg-emerald-50/60" },
+          { label: "Izin", value: totalExcused, color: "text-blue-600", bg: "bg-blue-50/60" },
+          { label: "Sakit", value: totalSick, color: "text-amber-600", bg: "bg-amber-50/60" },
+          { label: "Alpa", value: totalAbsent, color: "text-rose-600", bg: "bg-rose-50/60" },
         ].map((card) => (
-          <div
-            key={card.label}
-            className="bg-white rounded-3xl p-5 shadow-xl shadow-blue-900/5 border border-slate-100 flex flex-col gap-1"
-          >
-            <div className={`text-3xl font-black ${card.color}`}>
-              {card.value}
-            </div>
-            <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-              {card.label}
-            </div>
+          <div key={card.label} className={`rounded-2xl p-4 border border-slate-200 shadow-sm ${card.bg}`}>
+            <div className={`text-2xl font-black ${card.color}`}>{card.value}</div>
+            <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mt-0.5">{card.label}</div>
           </div>
         ))}
       </div>
 
-      {/* Controls Card */}
-      <div className="max-w-7xl mx-auto mb-6 bg-white rounded-3xl border border-slate-100 shadow-sm p-5 flex flex-col gap-4">
-        {/* Row 1: Search */}
+      <div className="max-w-7xl mx-auto mb-6 bg-white rounded-2xl border border-slate-200 p-4 space-y-3 shadow-sm">
         <div className="relative">
-          <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-            <Search size={16} className="text-slate-400" />
-          </div>
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
-            placeholder="Search session name..."
+            placeholder="Cari nama sesi latihan..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all"
+            className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
-
-        {/* Row 2: Filter Status + Date Range + Sort + Clear */}
-        <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
-          {/* Filter Status */}
-          <div className="relative flex-shrink-0 sm:w-48">
-            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-              <Filter size={15} className="text-slate-400" />
-            </div>
-            <select
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value)}
-              className="w-full pl-9 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all appearance-none cursor-pointer font-medium text-slate-600"
-            >
-              <option value="all">All Status</option>
-              <option value="hadir_qr">Present (QR)</option>
-              <option value="hadir_manual">Present (Manual)</option>
-              <option value="izin">Excused</option>
-              <option value="sakit">Sick</option>
-              <option value="alpa">Absent</option>
-            </select>
-          </div>
-
-          {/* Date Range */}
-          <div className="flex items-center gap-2 flex-1">
-            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-400 uppercase tracking-wider shrink-0">
-              <CalendarDays size={14} />
-              <span className="hidden md:inline">From</span>
-            </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value)}
+            className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 outline-none font-medium cursor-pointer"
+          >
+            <option value="all">Semua Status</option>
+            <option value="hadir_qr">Hadir (QR)</option>
+            <option value="hadir_manual">Hadir (Manual)</option>
+            <option value="izin">Izin</option>
+            <option value="sakit">Sakit</option>
+            <option value="alpa">Alpa</option>
+          </select>
+          <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-xl px-2 py-1">
+            <CalendarDays size={13} className="text-slate-400" />
             <input
               type="date"
               value={dateFrom}
-              max={dateTo || undefined}
               onChange={(e) => setDateFrom(e.target.value)}
-              className="flex-1 min-w-0 py-3 px-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all font-medium text-slate-600 cursor-pointer"
+              className="bg-transparent outline-none text-xs text-slate-700 cursor-pointer"
             />
-            <span className="text-slate-300 font-bold shrink-0">-</span>
+            <span className="text-slate-400 text-xs">-</span>
             <input
               type="date"
               value={dateTo}
-              min={dateFrom || undefined}
               onChange={(e) => setDateTo(e.target.value)}
-              className="flex-1 min-w-0 py-3 px-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all font-medium text-slate-600 cursor-pointer"
+              className="bg-transparent outline-none text-xs text-slate-700 cursor-pointer"
             />
           </div>
-
-          {/* Sort + Clear */}
-          <div className="flex gap-2 flex-shrink-0">
+          <button
+            onClick={() => setSortOrder((prev) => (prev === "desc" ? "asc" : "desc"))}
+            className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-600 flex items-center gap-1"
+          >
+            <ArrowUpDown size={13} /> {sortOrder === "desc" ? "Terbaru" : "Terlama"}
+          </button>
+          {hasActiveFilters && (
             <button
-              onClick={() =>
-                setSortOrder((prev) => (prev === "desc" ? "asc" : "desc"))
-              }
-              className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 hover:bg-slate-100 text-slate-600 font-bold py-3 px-4 rounded-2xl transition-all text-sm"
+              onClick={clearFilters}
+              className="px-3 py-2 bg-rose-50 border border-rose-200 rounded-xl text-xs font-bold text-rose-600 flex items-center gap-1 hover:bg-rose-100 transition-colors ml-auto"
             >
-              <ArrowUpDown
-                size={15}
-                className={
-                  sortOrder === "desc" ? "text-blue-600" : "text-slate-400"
-                }
-              />
-              {sortOrder === "desc" ? "Newest" : "Oldest"}
+              <X size={13} /> Bersihkan Filter
             </button>
-
-            {hasActiveFilters && (
-              <button
-                onClick={clearAllFilters}
-                className="flex items-center gap-1.5 bg-red-50 border border-red-200 hover:bg-red-100 text-red-500 font-bold py-3 px-4 rounded-2xl transition-all text-sm"
-              >
-                <X size={15} />
-                Clear
-              </button>
-            )}
-          </div>
+          )}
         </div>
       </div>
 
-      {/* Table */}
-      <div className="max-w-7xl mx-auto bg-white rounded-3xl shadow-xl shadow-blue-900/5 border border-slate-100 overflow-hidden flex flex-col min-h-[400px]">
-        <div className="p-6 border-b border-slate-50 flex justify-between items-center bg-white">
-          <h2 className="font-bold text-slate-800">Log History</h2>
-          <span className="text-xs bg-blue-50 text-blue-600 px-3 py-1 rounded-full font-bold">
-            {processedLogs.length} Records Found
-          </span>
-        </div>
-
-        <div className="overflow-x-auto flex-1">
-          <table className="w-full text-left border-collapse min-w-[600px]">
+      <div className="max-w-7xl mx-auto">
+        <div className="hidden md:block bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+          <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-slate-50/50 text-slate-400 text-[11px] uppercase tracking-widest font-black">
-                <th className="px-6 py-4">Timestamp</th>
-                <th className="px-6 py-4">Session Details</th>
+              <tr className="bg-slate-50 text-slate-400 text-[10px] uppercase tracking-wider font-bold border-b border-slate-100">
+                <th className="px-6 py-4">Waktu Pindai</th>
+                <th className="px-6 py-4">Rincian Sesi</th>
                 <th className="px-6 py-4 text-right">Status</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-50">
+            <tbody className="divide-y divide-slate-100 text-xs">
               {paginatedLogs.map((log) => {
-                const scanDateObj = new Date(log.scanned_at);
-                const dateStr = scanDateObj.toLocaleDateString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                  year: "numeric",
-                });
-                const timeStr = scanDateObj.toLocaleTimeString("en-US", {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                });
-
-                // Parsing the session_date (TIMESTAMP)
-                const sessionDateObj = new Date(log.sessions?.session_date);
-                const sessionDateStr = sessionDateObj.toLocaleDateString(
-                  "en-US",
-                  {
-                    month: "short",
-                    day: "numeric",
-                    year: "numeric",
-                  },
-                );
-                const sessionTimeStr = sessionDateObj.toLocaleTimeString(
-                  "en-US",
-                  {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  },
-                );
-
+                const scanDate = new Date(log.scanned_at);
+                const dateStr = scanDate.toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
+                const timeStr = scanDate.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
                 return (
-                  <tr
-                    key={log.id}
-                    className="hover:bg-blue-50/30 transition-colors group"
-                  >
-                    <td className="px-6 py-4">
-                      <div className="font-bold text-slate-700 text-sm flex items-center gap-1.5">
-                        <CalendarDays size={14} className="text-blue-500" />
-                        {dateStr}
-                      </div>
-                      <div className="text-xs text-slate-400 mt-1 flex items-center gap-1.5">
-                        <Clock size={14} />
-                        {timeStr}
-                      </div>
+                  <tr key={log.id} className="hover:bg-slate-50/50">
+                    <td className="px-6 py-4 text-slate-600 font-medium">
+                      {dateStr} • {timeStr} WIB
                     </td>
                     <td className="px-6 py-4">
-                      <div className="font-semibold text-slate-800 text-sm">
-                        {log.sessions?.name || "Unknown Session"}
-                      </div>
-                      <div className="text-xs text-slate-500 mt-0.5">
-                        {sessionDateStr} • {sessionTimeStr}
-                      </div>
+                      <div className="font-bold text-slate-800 text-sm">{log.sessions?.name || "Sesi Latihan"}</div>
                     </td>
                     <td className="px-6 py-4 text-right">
-                      <span
-                        className={`inline-block px-3 py-1.5 rounded-lg border text-[10px] font-black uppercase tracking-wider ${getStatusStyle(log.status)}`}
-                      >
-                        {log.status.replace("_", " ")}
+                      <span className={`inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border ${getStatusBadgeStyle(log.status)}`}>
+                        {getStatusLabel(log.status)}
                       </span>
                     </td>
                   </tr>
                 );
               })}
-              {paginatedLogs.length === 0 && !loading && (
-                <tr>
-                  <td
-                    colSpan="3"
-                    className="px-6 py-20 text-center text-slate-400"
-                  >
-                    <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
-                      <Search size={32} className="text-slate-300" />
-                    </div>
-                    <p className="font-bold text-slate-600">No records found</p>
-                    <p className="text-sm mt-1">
-                      Coba sesuaikan pencarian atau opsi filter Anda.
-                    </p>
-                  </td>
-                </tr>
-              )}
             </tbody>
           </table>
         </div>
 
-        {/* Pagination */}
-        {totalPages > 0 && (
-          <div className="p-4 border-t border-slate-50 flex items-center justify-between bg-slate-50/50">
-            <span className="text-xs font-medium text-slate-500 pl-2">
-              Page{" "}
-              <span className="font-bold text-slate-800">{currentPage}</span> of{" "}
+        <div className="md:hidden space-y-3">
+          {paginatedLogs.map((log) => {
+            const scanDate = new Date(log.scanned_at);
+            const dateStr = scanDate.toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
+            const timeStr = scanDate.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
+            return (
+              <div key={log.id} className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-2">
+                <div className="flex justify-between items-start">
+                  <h3 className="font-bold text-slate-800 text-sm">{log.sessions?.name || "Sesi Latihan"}</h3>
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-wider border ${getStatusBadgeStyle(log.status)}`}>
+                    {getStatusLabel(log.status)}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400">{dateStr} • {timeStr} WIB</p>
+              </div>
+            );
+          })}
+        </div>
+
+        {paginatedLogs.length === 0 && !loading && (
+          <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-400">
+            <p className="font-bold text-slate-700 text-sm">Tidak ada rekaman kehadiran</p>
+            <p className="text-xs mt-1">Coba sesuaikan kata kunci pencarian atau opsi filter Anda.</p>
+          </div>
+        )}
+
+        {totalPages > 1 && (
+          <div className="mt-4 p-3 bg-white rounded-2xl border border-slate-200 flex items-center justify-between text-xs text-slate-500 shadow-sm">
+            <span>
+              Halaman <span className="font-bold text-slate-800">{currentPage}</span> dari{" "}
               <span className="font-bold text-slate-800">{totalPages}</span>
             </span>
             <div className="flex gap-2">
               <button
                 onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                 disabled={currentPage === 1}
-                className="p-2 rounded-lg bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+                className="p-2 border border-slate-200 rounded-xl hover:bg-slate-50 disabled:opacity-40"
               >
-                <ChevronLeft size={18} />
+                <ChevronLeft size={16} />
               </button>
               <button
-                onClick={() =>
-                  setCurrentPage((p) => Math.min(totalPages, p + 1))
-                }
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
                 disabled={currentPage === totalPages}
-                className="p-2 rounded-lg bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+                className="p-2 border border-slate-200 rounded-xl hover:bg-slate-50 disabled:opacity-40"
               >
-                <ChevronRight size={18} />
+                <ChevronRight size={16} />
               </button>
             </div>
           </div>

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Outlet, Link, useNavigate, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -10,7 +10,8 @@ import {
   ScanLine,
   ClipboardList,
   ClipboardEdit,
-  CreditCard, // <-- IMPORT IKON BARU
+  CreditCard,
+  Bell,
   LogOut,
   Menu,
 } from "lucide-react";
@@ -19,6 +20,20 @@ export default function LayoutAdmin() {
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [adminName, setAdminName] = useState("Pengelola");
+  const [imgError, setImgError] = useState(false);
+
+  useEffect(() => {
+    const savedUser = localStorage.getItem("user_session");
+    if (savedUser) {
+      try {
+        const user = JSON.parse(savedUser);
+        if (user.full_name) {
+          setAdminName(user.full_name);
+        }
+      } catch (_) {}
+    }
+  }, []);
 
   const handleLogout = () => {
     localStorage.removeItem("user_session");
@@ -26,42 +41,47 @@ export default function LayoutAdmin() {
   };
 
   const menuItems = [
-    { name: "Dasbor", path: "/admin", icon: <LayoutDashboard size={22} /> },
+    { name: "Gambaran Umum", path: "/admin", icon: <LayoutDashboard size={20} /> },
     {
-      name: "Halaman Arahan",
+      name: "Halaman Utama",
       path: "/admin/landing",
-      icon: <LayoutTemplate size={22} />,
+      icon: <LayoutTemplate size={20} />,
     },
-    { name: "Kelas", path: "/admin/classes", icon: <Layers size={22} /> },
-    { name: "Atlet", path: "/admin/students", icon: <Users size={22} /> },
-    { name: "Pelatih", path: "/admin/coaches", icon: <UserPlus size={22} /> },
+    { name: "Tingkat Kelas", path: "/admin/classes", icon: <Layers size={20} /> },
+    { name: "Registri Atlet", path: "/admin/students", icon: <Users size={20} /> },
+    { name: "Kelola Instruktur", path: "/admin/coaches", icon: <UserPlus size={20} /> },
     {
-      name: "Pembayaran",
+      name: "Verifikasi Pembayaran",
       path: "/admin/payments",
-      icon: <CreditCard size={22} />,
+      icon: <CreditCard size={20} />,
     },
     {
-      name: "Sesi",
+      name: "Sesi Latihan",
       path: "/admin/sessions",
-      icon: <CalendarDays size={22} />,
+      icon: <CalendarDays size={20} />,
     },
-    { name: "Pindai QR", path: "/admin/scan", icon: <ScanLine size={22} /> },
     {
-      name: "Input Manual",
+      name: "Pengumuman",
+      path: "/admin/announcements",
+      icon: <Bell size={20} />,
+    },
+    { name: "Pemindai QR", path: "/admin/scan", icon: <ScanLine size={20} /> },
+    {
+      name: "Presensi Manual",
       path: "/admin/manual-entry",
-      icon: <ClipboardEdit size={22} />,
+      icon: <ClipboardEdit size={20} />,
     },
     {
-      name: "Catatan",
+      name: "Rekapitulasi",
       path: "/admin/recap",
-      icon: <ClipboardList size={22} />,
+      icon: <ClipboardList size={20} />,
     },
   ];
 
-  const pageTitle =
-    location.pathname === "/admin"
-      ? "Dasbor"
-      : location.pathname.replace("/admin/", "").replace(/-/g, " ");
+  const getPageTitle = () => {
+    const current = menuItems.find((item) => item.path === location.pathname);
+    return current ? current.name : "Panel Administrasi";
+  };
 
   return (
     <div className="flex h-screen bg-[#f8fafc] overflow-hidden font-sans">
@@ -86,35 +106,42 @@ export default function LayoutAdmin() {
         `}
       >
         {/* Logo Area */}
-        <div className="h-20 px-6 flex items-center border-b border-white/10">
-          <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-lg shadow-blue-500/30 overflow-hidden">
-            <img
-              src="/sirip_biru.webp"
-              alt="Siripbiru Logo"
-              className="w-full h-full object-cover"
-            />
+        <div className="h-20 px-5 flex items-center border-b border-white/10 shrink-0">
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 overflow-hidden bg-transparent">
+            {!imgError ? (
+              <img
+                src="/sirip_biru.webp"
+                alt="Logo Siripbiru"
+                className="w-full h-full object-contain"
+                onError={() => setImgError(true)}
+              />
+            ) : (
+              <div className="w-full h-full bg-blue-600 flex items-center justify-center rounded-xl text-white font-black text-xs">
+                SB
+              </div>
+            )}
           </div>
           <span
-            className={`ml-3 font-black text-xl tracking-wide whitespace-nowrap transition-opacity duration-300 ${
+            className={`ml-3 font-black text-xl tracking-tight whitespace-nowrap transition-opacity duration-300 ${
               sidebarOpen
                 ? "opacity-100"
                 : "opacity-0 lg:group-hover:opacity-100"
             }`}
           >
-            Sirip<span className="text-blue-400">biru</span>
+            Sirip<span className="text-cyan-400">biru</span>
           </span>
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 px-4 py-8 space-y-2 overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+        <nav className="flex-1 px-4 py-6 space-y-1.5 overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
           <p
-            className={`px-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-4 transition-opacity duration-300 ${
+            className={`px-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3 transition-opacity duration-300 ${
               sidebarOpen
                 ? "opacity-100"
                 : "opacity-0 lg:group-hover:opacity-100"
             }`}
           >
-            Management
+            Menu Manajemen
           </p>
 
           {menuItems.map((item) => {
@@ -127,15 +154,15 @@ export default function LayoutAdmin() {
                   window.innerWidth < 1024 && setSidebarOpen(false)
                 }
                 title={item.name}
-                className={`flex items-center gap-4 px-4 py-3.5 rounded-2xl transition-all duration-300 ${
+                className={`flex items-center gap-4 px-3.5 py-3 rounded-2xl text-xs font-bold transition-all duration-200 ${
                   isActive
                     ? "bg-blue-600 text-white shadow-lg shadow-blue-600/30"
                     : "text-slate-400 hover:bg-white/5 hover:text-white"
                 }`}
               >
-                <div className="flex-shrink-0">{item.icon}</div>
+                <div className="shrink-0">{item.icon}</div>
                 <span
-                  className={`font-medium whitespace-nowrap transition-opacity duration-300 ${
+                  className={`whitespace-nowrap transition-opacity duration-300 ${
                     sidebarOpen
                       ? "opacity-100"
                       : "opacity-0 lg:group-hover:opacity-100"
@@ -149,23 +176,23 @@ export default function LayoutAdmin() {
         </nav>
 
         {/* User / Logout Area */}
-        <div className="p-4 border-t border-white/10">
+        <div className="p-4 border-t border-white/10 shrink-0">
           <button
             onClick={handleLogout}
-            title="Sign Out"
-            className="w-full flex items-center gap-4 px-4 py-3.5 text-slate-400 hover:bg-red-500/10 hover:text-red-400 rounded-2xl transition-all group/logout"
+            title="Keluar Akun"
+            className="w-full flex items-center gap-4 px-3.5 py-3 text-slate-400 hover:bg-rose-500/10 hover:text-rose-400 rounded-2xl text-xs font-bold transition-all group/logout"
           >
-            <div className="flex-shrink-0 group-hover/logout:scale-110 transition-transform">
-              <LogOut size={22} />
+            <div className="shrink-0 group-hover/logout:scale-110 transition-transform">
+              <LogOut size={20} />
             </div>
             <span
-              className={`font-medium whitespace-nowrap transition-opacity duration-300 ${
+              className={`whitespace-nowrap transition-opacity duration-300 ${
                 sidebarOpen
                   ? "opacity-100"
                   : "opacity-0 lg:group-hover:opacity-100"
               }`}
             >
-              Sign Out
+              Keluar Akun
             </span>
           </button>
         </div>
@@ -173,40 +200,36 @@ export default function LayoutAdmin() {
 
       {/* Main Content Wrapper */}
       <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden relative">
-        {/* Top Header */}
-        <header className="h-20 bg-white/80 backdrop-blur-md border-b border-slate-100 px-6 lg:px-8 flex items-center justify-between z-10 sticky top-0">
+        <header className="h-20 bg-white/80 backdrop-blur-md border-b border-slate-200 px-6 lg:px-8 flex items-center justify-between z-10 sticky top-0 shrink-0">
           <div className="flex items-center gap-4">
             <button
               onClick={() => setSidebarOpen(true)}
-              className="p-2.5 rounded-xl hover:bg-slate-50 text-slate-500 transition-colors border border-transparent hover:border-slate-100 lg:hidden"
+              className="p-2.5 rounded-xl hover:bg-slate-100 text-slate-600 transition-colors lg:hidden"
+              aria-label="Buka Menu"
             >
               <Menu size={20} />
             </button>
-            <h1 className="text-xl font-bold text-slate-800 capitalize tracking-tight hidden sm:block">
-              {pageTitle}
+            <h1 className="text-lg font-extrabold text-slate-800 tracking-tight hidden sm:block">
+              {getPageTitle()}
             </h1>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             <div className="text-right hidden md:block">
-              <p className="text-sm font-bold text-slate-800 leading-tight">
-                Admin User
+              <p className="text-xs font-bold text-slate-800 leading-tight truncate max-w-[200px]">
+                {adminName}
               </p>
-              <p className="text-xs text-slate-500 font-medium">
-                Administrator
+              <p className="text-[11px] text-blue-600 font-semibold mt-0.5">
+                Administrator Klub
               </p>
             </div>
-            <div className="w-10 h-10 rounded-full bg-slate-100 border-2 border-white shadow-sm flex items-center justify-center text-blue-600 font-bold overflow-hidden">
-              <img
-                src={`https://api.dicebear.com/7.x/initials/svg?seed=Admin&backgroundColor=eff6ff&textColor=2563eb`}
-                alt="Admin avatar"
-              />
+            <div className="w-10 h-10 rounded-2xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 font-black text-xs shadow-sm">
+              {adminName?.[0]?.toUpperCase() || "A"}
             </div>
           </div>
         </header>
 
-        {/* Page Content */}
-        <main className="flex-1 overflow-y-auto bg-[#f8fafc] [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+        <main className="flex-1 overflow-y-auto bg-[#f8fafc]">
           <div className="animate-in fade-in duration-300 h-full">
             <Outlet />
           </div>

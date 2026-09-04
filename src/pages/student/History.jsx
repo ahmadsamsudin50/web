@@ -16,7 +16,6 @@ export default function History() {
   const [coachesMap, setCoachesMap] = useState({});
   const [loading, setLoading] = useState(true);
 
-  // States for Search, Filter, Sort, & Pagination
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [sortOrder, setSortOrder] = useState("desc");
@@ -31,16 +30,14 @@ export default function History() {
         if (!savedUser) return;
         const user = JSON.parse(savedUser);
 
-        // 1. Dapatkan student_id
         const { data: student, error: studentError } = await supabase
           .from("students")
           .select("id")
           .eq("user_id", user.id)
           .single();
 
-        if (studentError || !student) throw new Error("Athlete data not found");
+        if (studentError || !student) throw new Error("Data atlet tidak ditemukan");
 
-        // 2. Tarik semua data pelatih untuk mapping nama berdasarkan coach_ids
         const { data: coachData } = await supabase
           .from("coaches")
           .select("id, users(full_name)");
@@ -53,7 +50,6 @@ export default function History() {
         }
         setCoachesMap(cMap);
 
-        // 3. Tarik riwayat absensi (logs) beserta data enrollment untuk mengetahui kelasnya
         const { data: attendanceLogs, error } = await supabase
           .from("attendance_logs")
           .select(
@@ -69,7 +65,7 @@ export default function History() {
         if (error) throw error;
         setLogs(attendanceLogs || []);
       } catch (err) {
-        console.error("Error fetching history:", err);
+        console.error("Gagal mengambil riwayat:", err);
       } finally {
         setLoading(false);
       }
@@ -78,12 +74,10 @@ export default function History() {
     fetchHistory();
   }, []);
 
-  // Reset pagination to page 1 if filter/search/sort changes
   useEffect(() => {
     setCurrentPage(1);
   }, [searchQuery, filterStatus, sortOrder]);
 
-  // Process Data: Search -> Filter -> Sort
   let processedLogs = [...logs];
 
   if (searchQuery) {
@@ -105,21 +99,30 @@ export default function History() {
     return sortOrder === "desc" ? dateB - dateA : dateA - dateB;
   });
 
-  // Pagination Logic
   const totalPages = Math.ceil(processedLogs.length / ITEMS_PER_PAGE);
   const paginatedLogs = processedLogs.slice(
     (currentPage - 1) * ITEMS_PER_PAGE,
     currentPage * ITEMS_PER_PAGE,
   );
 
-  // Helper for Status Badge
-  const getStatusStyle = (status) => {
-    if (status.includes("hadir"))
-      return "bg-emerald-100 text-emerald-700 border-emerald-200";
-    if (status === "izin")
-      return "bg-amber-100 text-amber-700 border-amber-200";
-    if (status === "sakit") return "bg-red-100 text-red-700 border-red-200";
-    return "bg-slate-100 text-slate-700 border-slate-200";
+  const getStatusBadgeStyle = (status) => {
+    if (!status) return "bg-slate-100 text-slate-600 border-slate-300";
+    const s = status.toLowerCase();
+    if (s.includes("hadir_qr")) return "bg-emerald-500 text-white border-emerald-600 shadow-sm";
+    if (s.includes("hadir_manual")) return "bg-teal-500 text-white border-teal-600 shadow-sm";
+    if (s.includes("izin")) return "bg-blue-500 text-white border-blue-600 shadow-sm";
+    if (s.includes("sakit")) return "bg-amber-400 text-amber-950 border-amber-500 shadow-sm";
+    if (s.includes("alpa")) return "bg-rose-600 text-white border-rose-700 shadow-sm";
+    return "bg-slate-200 text-slate-700 border-slate-300";
+  };
+
+  const getStatusLabel = (status) => {
+    if (status === "hadir_qr") return "Hadir (QR)";
+    if (status === "hadir_manual") return "Hadir (Manual)";
+    if (status === "izin") return "Izin";
+    if (status === "sakit") return "Sakit";
+    if (status === "alpa") return "Alpa";
+    return status ? status.replace("_", " ") : "-";
   };
 
   if (loading) {
@@ -134,8 +137,7 @@ export default function History() {
   }
 
   return (
-    <div className="py-6 font-sans max-w-7xl mx-auto w-full px-2">
-      {/* Header */}
+    <div className="py-6 font-sans max-w-7xl mx-auto w-full px-2 sm:px-4">
       <div className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight flex items-center gap-3">
@@ -143,17 +145,15 @@ export default function History() {
             Riwayat Kehadiran
           </h1>
           <p className="text-slate-500 mt-1 text-sm">
-            Lacak catatan latihan renang dan ringkasan Anda.
+            Lacak catatan latihan renang dan ringkasan kehadiran Anda.
           </p>
         </div>
         <div className="bg-blue-50 text-blue-700 px-5 py-3 rounded-2xl text-sm font-bold border border-blue-100 shadow-sm w-fit">
-          Total Logs: {processedLogs.length}
+          Total Rekaman: {processedLogs.length}
         </div>
       </div>
 
-      {/* Controls Section (Search, Filter, Sort) */}
       <div className="mb-6 grid grid-cols-1 md:grid-cols-4 gap-4">
-        {/* Search Input */}
         <div className="relative md:col-span-2">
           <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
             <Search size={18} className="text-slate-400" />
@@ -167,7 +167,6 @@ export default function History() {
           />
         </div>
 
-        {/* Filter */}
         <div className="relative">
           <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
             <Filter size={18} className="text-slate-400" />
@@ -186,7 +185,6 @@ export default function History() {
           </select>
         </div>
 
-        {/* Sort */}
         <button
           onClick={() =>
             setSortOrder((prev) => (prev === "desc" ? "asc" : "desc"))
@@ -199,18 +197,17 @@ export default function History() {
               sortOrder === "desc" ? "text-blue-600" : "text-slate-400"
             }
           />
-          {sortOrder === "desc" ? "Newest" : "Oldest"}
+          {sortOrder === "desc" ? "Terbaru" : "Terlama"}
         </button>
       </div>
 
-      {/* TABLE SECTION */}
       <div className="bg-white rounded-3xl shadow-xl shadow-blue-900/5 border border-slate-100 overflow-hidden flex flex-col min-h-[400px] mb-8">
-        <div className="overflow-x-auto flex-1">
+        <div className="hidden md:block overflow-x-auto flex-1">
           <table className="w-full text-left border-collapse min-w-[800px]">
             <thead>
               <tr className="bg-slate-50/50 text-slate-400 text-[11px] uppercase tracking-widest font-black">
-                <th className="px-6 py-4">Waktu</th>
-                <th className="px-6 py-4">Detail Sesi</th>
+                <th className="px-6 py-4">Waktu Pindai</th>
+                <th className="px-6 py-4">Rincian Sesi</th>
                 <th className="px-6 py-4">Kelas & Instruktur</th>
                 <th className="px-6 py-4 text-right">Status</th>
               </tr>
@@ -218,42 +215,33 @@ export default function History() {
             <tbody className="divide-y divide-slate-50">
               {paginatedLogs.map((log) => {
                 const scanDateObj = new Date(log.scanned_at);
-                const dateStr = scanDateObj.toLocaleDateString("en-US", {
-                  month: "short",
+                const dateStr = scanDateObj.toLocaleDateString("id-ID", {
                   day: "numeric",
+                  month: "long",
                   year: "numeric",
                 });
-                const timeStr = scanDateObj.toLocaleTimeString("en-US", {
+                const timeStr = scanDateObj.toLocaleTimeString("id-ID", {
                   hour: "2-digit",
                   minute: "2-digit",
                 });
 
-                // Parse the session_date (TIMESTAMP)
                 const sessionDateObj = new Date(log.sessions?.session_date);
-                const sessionDateStr = sessionDateObj.toLocaleDateString(
-                  "en-US",
-                  {
-                    month: "short",
-                    day: "numeric",
-                    year: "numeric",
-                  },
-                );
-                const sessionTimeStr = sessionDateObj.toLocaleTimeString(
-                  "en-US",
-                  {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  },
-                );
+                const sessionDateStr = sessionDateObj.toLocaleDateString("id-ID", {
+                  day: "numeric",
+                  month: "short",
+                  year: "numeric",
+                });
+                const sessionTimeStr = sessionDateObj.toLocaleTimeString("id-ID", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                });
 
-                // Identifikasi nama instruktur dari array coach_ids
                 const assignedCoaches =
                   log.sessions?.coach_ids?.map(
-                    (id) => coachesMap[id] || "Unknown Coach",
+                    (id) => coachesMap[id] || "Instruktur Tidak Dikenal",
                   ) || [];
 
-                // Nama kelas dinamis dari relasi enrollment_id
-                const dynamicClassName = log.student_enrollments?.classes?.name || "General / Legacy Class";
+                const dynamicClassName = log.student_enrollments?.classes?.name || "Kelas Umum";
 
                 return (
                   <tr
@@ -268,16 +256,16 @@ export default function History() {
                         </div>
                         <div className="text-xs text-slate-400 mt-1 flex items-center gap-1.5">
                           <Clock size={14} />
-                          {timeStr}
+                          {timeStr} WIB
                         </div>
                       </div>
                     </td>
                     <td className="px-6 py-4">
                       <div className="font-semibold text-slate-800 text-base">
-                        {log.sessions?.name || "Unknown Session"}
+                        {log.sessions?.name || "Sesi Tidak Dikenal"}
                       </div>
                       <div className="text-xs text-slate-500 mt-0.5">
-                        {sessionDateStr} • {sessionTimeStr}
+                        Jadwal: {sessionDateStr} • {sessionTimeStr} WIB
                       </div>
                     </td>
                     <td className="px-6 py-4">
@@ -285,7 +273,7 @@ export default function History() {
                         {dynamicClassName}
                       </div>
                       <div className="text-xs text-slate-500 mt-0.5">
-                        <span className="font-medium">Coach:</span>{" "}
+                        <span className="font-medium">Pelatih:</span>{" "}
                         {assignedCoaches.length > 0
                           ? assignedCoaches.join(", ")
                           : "Belum ditentukan"}
@@ -293,44 +281,77 @@ export default function History() {
                     </td>
                     <td className="px-6 py-4 text-right">
                       <span
-                        className={`inline-block px-3 py-1.5 rounded-lg border text-[10px] font-black uppercase tracking-wider ${getStatusStyle(log.status)}`}
+                        className={`inline-block px-3 py-1.5 rounded-lg border text-[10px] font-black uppercase tracking-wider ${getStatusBadgeStyle(log.status)}`}
                       >
-                        {log.status.replace("_", " ")}
+                        {getStatusLabel(log.status)}
                       </span>
                     </td>
                   </tr>
                 );
               })}
-
-              {/* Empty State */}
-              {paginatedLogs.length === 0 && !loading && (
-                <tr>
-                  <td
-                    colSpan="4"
-                    className="px-6 py-20 text-center text-slate-400"
-                  >
-                    <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
-                      <Search size={32} className="text-slate-300" />
-                    </div>
-                    <p className="font-bold text-slate-600 text-lg">
-                      Tidak ada catatan ditemukan
-                    </p>
-                    <p className="text-sm mt-1">
-                      Coba sesuaikan pencarian atau opsi filter Anda.
-                    </p>
-                  </td>
-                </tr>
-              )}
             </tbody>
           </table>
         </div>
 
-        {/* Pagination Footer */}
+        <div className="md:hidden divide-y divide-slate-100 p-4 space-y-3">
+          {paginatedLogs.map((log) => {
+            const scanDateObj = new Date(log.scanned_at);
+            const dateStr = scanDateObj.toLocaleDateString("id-ID", {
+              day: "numeric",
+              month: "short",
+              year: "numeric",
+            });
+            const timeStr = scanDateObj.toLocaleTimeString("id-ID", {
+              hour: "2-digit",
+              minute: "2-digit",
+            });
+
+            const assignedCoaches =
+              log.sessions?.coach_ids?.map(
+                (id) => coachesMap[id] || "Instruktur",
+              ) || [];
+
+            return (
+              <div key={log.id} className="pt-3 first:pt-0 space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <h3 className="font-bold text-slate-800 text-sm">{log.sessions?.name || "Sesi Latihan"}</h3>
+                    <p className="text-xs text-blue-600 font-semibold mt-0.5">
+                      {log.student_enrollments?.classes?.name || "Kelas Umum"}
+                    </p>
+                  </div>
+                  <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border shrink-0 ${getStatusBadgeStyle(log.status)}`}>
+                    {getStatusLabel(log.status)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-[11px] text-slate-400">
+                  <span>Pelatih: {assignedCoaches.join(", ") || "Belum ditentukan"}</span>
+                  <span>{dateStr} • {timeStr} WIB</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {paginatedLogs.length === 0 && !loading && (
+          <div className="px-6 py-20 text-center text-slate-400">
+            <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Search size={32} className="text-slate-300" />
+            </div>
+            <p className="font-bold text-slate-600 text-lg">
+              Tidak ada catatan ditemukan
+            </p>
+            <p className="text-sm mt-1">
+              Coba sesuaikan kata kunci pencarian atau opsi filter Anda.
+            </p>
+          </div>
+        )}
+
         {totalPages > 0 && (
           <div className="p-4 border-t border-slate-50 flex items-center justify-between bg-slate-50/50">
             <span className="text-xs font-medium text-slate-500 pl-2">
-              Page{" "}
-              <span className="font-bold text-slate-800">{currentPage}</span> of{" "}
+              Halaman{" "}
+              <span className="font-bold text-slate-800">{currentPage}</span> dari{" "}
               <span className="font-bold text-slate-800">{totalPages}</span>
             </span>
             <div className="flex gap-2">

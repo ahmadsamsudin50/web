@@ -11,20 +11,21 @@ import {
   History as HistoryIcon,
   UserCheck,
   Phone,
-  Copy 
+  Copy,
+  Layers,
 } from "lucide-react";
 
 const TABS = [
   { key: "upcoming", label: "Mendatang", icon: CalendarClock },
   { key: "today", label: "Hari Ini", icon: Zap },
-  { key: "past", label: "Masa Lalu", icon: HistoryIcon },
+  { key: "past", label: "Riwayat", icon: HistoryIcon },
 ];
 
 export default function Schedule() {
   const [sessions, setSessions] = useState([]);
   const [coachesMap, setCoachesMap] = useState({});
+  const [classesMap, setClassesMap] = useState({});
   const [loading, setLoading] = useState(true);
-
   const [activeTab, setActiveTab] = useState("upcoming");
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -33,45 +34,48 @@ export default function Schedule() {
       setLoading(true);
       try {
         const savedUser = localStorage.getItem("user_session");
-        if (!savedUser) throw new Error("Sesi berakhir. Silakan login kembali.");
+        if (!savedUser) throw new Error("Sesi berakhir. Silakan masuk kembali.");
         const user = JSON.parse(savedUser);
 
-        // 1. Dapatkan student dan semua kelas aktifnya (Many-to-Many)
+        // 1. Dapatkan student_id dan daftar kelas aktif saja
         const { data: studentData, error: studentError } = await supabase
           .from("students")
-          .select(`
-            id,
-            student_enrollments(class_id, status)
-          `)
+          .select("id, student_enrollments(class_id, status, classes(name))")
           .eq("user_id", user.id)
           .single();
 
         if (studentError || !studentData) throw new Error("Data atlet tidak ditemukan.");
 
-        // Ambil array class_id yang statusnya masih aktif
-        const activeClassIds = studentData.student_enrollments
-          ?.filter(e => e.status === "active")
-          .map(e => e.class_id) || [];
+        // Hanya kelas dengan status 'active' yang jadwalnya akan diproses
+        const activeEnrollments = studentData.student_enrollments?.filter(
+          (e) => e.status === "active"
+        ) || [];
 
-        // 2. Tarik jadwal sesi dan filter sesuai kelas atlet yang aktif
+        const activeClassIds = activeEnrollments.map((e) => e.class_id);
+
+        const cMapNames = {};
+        activeEnrollments.forEach((e) => {
+          cMapNames[e.class_id] = e.classes?.name;
+        });
+        setClassesMap(cMapNames);
+
         let sessionData = [];
         if (activeClassIds.length > 0) {
           const { data: allSessions, error: sessionError } = await supabase
             .from("sessions")
-            .select("*")
+            .select("id, name, session_date, is_active, class_ids, coach_ids")
             .order("session_date", { ascending: true });
 
           if (sessionError) throw sessionError;
 
-          // Filter secara lokal untuk mencari irisan (intersection) array class_ids
-          sessionData = allSessions.filter((session) => {
+          // Saring sesi yang mencakup kelas aktif atlet
+          sessionData = (allSessions || []).filter((session) => {
             if (!session.class_ids) return false;
-            // Pastikan sesi ini memuat minimal 1 kelas yang diikuti atlet
-            return session.class_ids.some(cId => activeClassIds.includes(cId));
+            return session.class_ids.some((cId) => activeClassIds.includes(cId));
           });
         }
 
-        // 3. Tarik semua data pelatih untuk mapping kontak
+        // 2. Ambil data pelatih untuk nama, nomor telepon, dan spesialisasi
         const { data: coachData, error: coachError } = await supabase
           .from("coaches")
           .select("id, specialty, phone_number, users(full_name)");
@@ -79,11 +83,11 @@ export default function Schedule() {
         if (coachError) throw coachError;
 
         const cMap = {};
-        coachData.forEach(c => {
-          cMap[c.id] = { 
-            name: c.users?.full_name, 
+        (coachData || []).forEach((c) => {
+          cMap[c.id] = {
+            name: c.users?.full_name || "Pelatih",
             specialty: c.specialty,
-            phone: c.phone_number 
+            phone: c.phone_number,
           };
         });
 
@@ -95,19 +99,15 @@ export default function Schedule() {
         setLoading(false);
       }
     };
-
     fetchData();
   }, []);
 
   const handleCopyPhone = (phoneNumber) => {
     if (!phoneNumber) return;
     navigator.clipboard.writeText(phoneNumber);
-    toast.success("Nomor telepon disalin ke papan klip!");
+    toast.success("Nomor telepon berhasil disalin!");
   };
 
-  // ==========================================
-  // TIMESTAMP-BASED GROUPING LOGIC
-  // ==========================================
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
@@ -121,13 +121,16 @@ export default function Schedule() {
     past: sessions.filter((s) => new Date(s.session_date).getTime() < todayStart),
   };
 
-  let processedSessions = [...grouped[activeTab]];
-
+  let processedSessions = [...(grouped[activeTab] || [])];
   if (searchQuery) {
     const query = searchQuery.toLowerCase();
-    processedSessions = processedSessions.filter((s) =>
-      s.name.toLowerCase().includes(query)
-    );
+    processedSessions = processedSessions.filter((s) => {
+      const matchName = s.name.toLowerCase().includes(query);
+      const matchClass = s.class_ids?.some((cId) =>
+        classesMap[cId]?.toLowerCase().includes(query)
+      );
+      return matchName || matchClass;
+    });
   }
 
   if (activeTab === "upcoming" || activeTab === "today") {
@@ -138,52 +141,44 @@ export default function Schedule() {
 
   if (loading) {
     return (
-      <div className="min-h-[70vh] flex flex-col items-center justify-center">
-        <div className="w-12 h-12 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-4"></div>
-        <p className="text-slate-500 font-medium animate-pulse">
-          Memuat jadwal Anda...
-        </p>
+      <div className="min-h-[70vh] flex flex-col items-center justify-center font-sans">
+        <div className="w-10 h-10 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-3"></div>
+        <p className="text-slate-500 text-sm font-medium animate-pulse">Memuat jadwal latihan...</p>
       </div>
     );
   }
 
   return (
     <div className="min-h-screen bg-[#f8fafc] p-4 md:p-8 font-sans">
-      <Toaster position="top-right" toastOptions={{ style: { borderRadius: "16px", fontWeight: "500" } }} />
-
-      {/* Header */}
-      <div className="max-w-7xl mx-auto mb-8">
+      <Toaster position="top-right" />
+      <div className="max-w-7xl mx-auto mb-6">
         <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight flex items-center gap-3">
-          <CalendarDays className="text-blue-600" size={32} />
+          <CalendarDays className="text-blue-600" size={28} />
           Jadwal Latihan Saya
         </h1>
         <p className="text-slate-500 mt-1 text-sm">
-          Lihat sesi renang mendatang dan pelatih yang ditugaskan.
+          Informasi sesi renang aktif dan kontak instruktur yang bertugas.
         </p>
       </div>
 
-      <div className="max-w-7xl mx-auto mb-6 flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
-        <div className="flex gap-2 p-1.5 bg-white border border-slate-100 rounded-2xl shadow-sm w-full sm:w-auto overflow-x-auto custom-scrollbar">
+      <div className="max-w-7xl mx-auto mb-6 flex flex-col sm:flex-row gap-3 justify-between items-stretch sm:items-center">
+        <div className="flex gap-2 p-1.5 bg-white border border-slate-200 rounded-2xl shadow-sm overflow-x-auto">
           {TABS.map(({ key, label, icon: Icon }) => {
-            const count = grouped[key].length;
+            const count = grouped[key]?.length || 0;
             const isActive = activeTab === key;
             return (
               <button
                 key={key}
                 onClick={() => setActiveTab(key)}
-                className={`relative flex items-center justify-center gap-2 px-4 md:px-5 py-2.5 rounded-xl font-bold text-sm transition-all duration-200 whitespace-nowrap flex-1 sm:flex-none
-                  ${
-                    isActive
-                      ? "bg-blue-600 text-white shadow-lg shadow-blue-600/30"
-                      : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
-                  }`}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-xs sm:text-sm whitespace-nowrap transition-all ${
+                  isActive
+                    ? "bg-blue-600 text-white shadow-md shadow-blue-600/20"
+                    : "text-slate-500 hover:bg-slate-50"
+                }`}
               >
-                <Icon size={15} className="flex-shrink-0" />
+                <Icon size={16} />
                 {label}
-                <span
-                  className={`text-[10px] font-black px-1.5 py-0.5 rounded-full min-w-[18px] text-center flex-shrink-0
-                  ${isActive ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}
-                >
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${isActive ? "bg-white/20 text-white" : "bg-slate-100 text-slate-600"}`}>
                   {count}
                 </span>
               </button>
@@ -191,107 +186,116 @@ export default function Schedule() {
           })}
         </div>
 
-        <div className="relative w-full sm:w-72 flex-shrink-0">
-          <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-            <Search size={16} className="text-slate-400" />
-          </div>
+        <div className="relative w-full sm:w-72">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
-            placeholder="Cari sesi..."
+            placeholder="Cari sesi atau kelas..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-3 bg-white border border-slate-100 shadow-sm rounded-2xl text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all"
+            className="w-full pl-9 pr-3 py-2.5 bg-white border border-slate-200 rounded-2xl text-xs sm:text-sm outline-none focus:ring-2 focus:ring-blue-500 font-medium"
           />
         </div>
       </div>
 
       <div className="max-w-7xl mx-auto">
         {processedSessions.length === 0 ? (
-          <div className="bg-white rounded-3xl shadow-xl shadow-blue-900/5 border border-slate-100 py-20 px-6 text-center text-slate-400">
-            <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
-              <BookOpen size={32} className="text-slate-300" />
-            </div>
-            <p className="font-bold text-slate-600">
-              {activeTab === "today" && "No training scheduled for you today."}
-              {activeTab === "upcoming" && "No upcoming training sessions."}
-              {activeTab === "past" && "No past training history."}
-            </p>
+          <div className="bg-white rounded-3xl border border-slate-200 py-16 px-4 text-center text-slate-400 shadow-sm">
+            <BookOpen size={36} className="mx-auto mb-3 text-slate-300" />
+            <p className="font-bold text-slate-700 text-sm">Tidak ada sesi yang ditemukan</p>
+            <p className="text-xs mt-1">Hanya sesi dari kelas yang berstatus aktif yang ditampilkan di sini.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {processedSessions.map((session) => {
               const dateObj = new Date(session.session_date);
-              
-              const dayName = dateObj.toLocaleDateString("en-US", { weekday: "short" });
-              const dateFull = dateObj.toLocaleDateString("en-US", {
-                day: "numeric", month: "short", year: "numeric",
-              });
-              const timeStr = dateObj.toLocaleTimeString("en-US", {
-                hour: "2-digit", minute: "2-digit",
-              });
+              const dayName = dateObj.toLocaleDateString("id-ID", { weekday: "long" });
+              const dateFull = dateObj.toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
+              const timeStr = dateObj.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
+              const assignedCoaches = session.coach_ids?.map((id) => coachesMap[id] || { name: "Instruktur", phone: "" }) || [];
 
-              const assignedCoaches = session.coach_ids?.map(id => coachesMap[id] || { name: "Unknown Coach", phone: "" }) || [];
+              // Ambil nama-nama kelas yang aktif diikuti atlet pada sesi ini
+              const relevantClassNames = session.class_ids
+                ?.map((cId) => classesMap[cId])
+                .filter(Boolean) || [];
 
               return (
-                <div
-                  key={session.id}
-                  className={`bg-white rounded-3xl border p-5 md:p-6 flex flex-col gap-4 hover:-translate-y-1 transition-all duration-300
-                    ${activeTab === "today" ? "border-amber-200 shadow-xl shadow-amber-900/5" : "border-slate-100 shadow-sm"}`}
-                >
+                <div key={session.id} className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4 hover:shadow-md transition-shadow">
                   <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-3 md:gap-4">
-                      <div className={`w-10 h-10 md:w-12 md:h-12 rounded-2xl flex items-center justify-center flex-shrink-0
-                        ${activeTab === "today" ? "bg-amber-50 text-amber-500" : "bg-blue-50 text-blue-500"}`}>
-                        <CalendarDays size={20} className="md:w-[22px] md:h-[22px]" />
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                        <CalendarDays size={20} />
                       </div>
                       <div>
-                        <h3 className="font-bold text-slate-800 text-base md:text-lg leading-tight">
-                          {session.name}
-                        </h3>
-                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1 text-xs md:text-sm text-slate-600">
-                          <div className="flex items-center gap-1.5">
-                            <Clock size={12} className="text-slate-400 md:w-3.5 md:h-3.5" />
-                            <span className="font-semibold">{dayName}, {dateFull}</span>
-                          </div>
-                          <span className="text-blue-500 font-bold">• {timeStr}</span>
+                        <h3 className="font-bold text-slate-800 text-sm sm:text-base leading-tight">{session.name}</h3>
+                        <div className="flex items-center gap-2 mt-1 text-xs text-slate-500">
+                          <Clock size={12} className="text-slate-400" />
+                          <span>{dayName}, {dateFull} • {timeStr} WIB</span>
                         </div>
                       </div>
                     </div>
+
+                    {/* Tag Kelas Aktif Terkait */}
+                    <div className="flex flex-wrap gap-1 justify-end shrink-0">
+                      {relevantClassNames.map((className, idx) => (
+                        <span
+                          key={idx}
+                          className="bg-blue-50 text-blue-700 border border-blue-100 px-2 py-0.5 rounded-lg text-[10px] font-bold flex items-center gap-1"
+                        >
+                          <Layers size={10} />
+                          {className}
+                        </span>
+                      ))}
+                    </div>
                   </div>
 
-                  <div className="border-t border-slate-50" />
-
-                  <div className="flex flex-col gap-2">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
-                      <UserCheck size={14} className="text-indigo-400" /> Instructors
+                  {/* Instruktur Bertugas */}
+                  <div className="border-t border-slate-100 pt-3">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5 mb-2.5">
+                      <UserCheck size={14} className="text-indigo-500" /> Instruktur Bertugas
                     </span>
-                    {assignedCoaches.length > 0 ? (
-                      <div className="flex flex-wrap gap-2">
-                        {assignedCoaches.map((coach, i) => (
-                          <div key={i} className="flex flex-col bg-indigo-50/70 text-indigo-700 px-3 py-2 rounded-xl border border-indigo-100/50 flex-1 min-w-[140px] sm:flex-none">
-                            <span className="text-xs font-bold truncate">{coach.name}</span>
-                            
+                    <div className="flex flex-wrap gap-2.5">
+                      {assignedCoaches.length > 0 ? (
+                        assignedCoaches.map((coach, idx) => (
+                          <div
+                            key={idx}
+                            className="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-700 flex flex-col gap-1.5 min-w-[190px] flex-1 sm:flex-none shadow-sm"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-bold text-slate-800 truncate">{coach.name}</span>
+                              {coach.specialty && (
+                                <span className="text-[9px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-semibold border border-blue-100 shrink-0">
+                                  {coach.specialty}
+                                </span>
+                              )}
+                            </div>
+
                             {coach.phone ? (
-                              <button 
+                              <button
+                                type="button"
                                 onClick={() => handleCopyPhone(coach.phone)}
-                                className="text-[10px] font-medium flex items-center gap-1.5 opacity-80 hover:opacity-100 mt-0.5 transition-all w-fit cursor-pointer active:scale-95 group"
-                                title="Klik untuk salin nomor telepon"
+                                className="flex items-center justify-between gap-1.5 px-2 py-1 bg-white border border-slate-200 hover:border-indigo-400 hover:bg-indigo-50/50 rounded-lg text-indigo-600 transition-all text-[11px] font-mono active:scale-95 group"
+                                title="Klik untuk menyalin nomor telepon"
                               >
-                                <Phone size={10} className="group-hover:text-indigo-900 flex-shrink-0" /> 
-                                <span className="group-hover:underline group-hover:text-indigo-900 truncate">{coach.phone}</span>
-                                <Copy size={10} className="ml-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+                                <span className="flex items-center gap-1.5 truncate">
+                                  <Phone size={12} className="text-indigo-500 shrink-0" />
+                                  <span className="font-medium text-slate-700 group-hover:text-indigo-700 truncate">
+                                    {coach.phone}
+                                  </span>
+                                </span>
+                                <Copy size={12} className="text-slate-400 group-hover:text-indigo-600 shrink-0" />
                               </button>
                             ) : (
-                              <span className="text-[10px] font-medium flex items-center gap-1 opacity-60 mt-0.5">
-                                <Phone size={10} className="flex-shrink-0" /> No Contact
+                              <span className="text-[11px] text-slate-400 flex items-center gap-1">
+                                <Phone size={11} className="text-slate-300" /> Tidak ada kontak
                               </span>
                             )}
                           </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <span className="text-sm text-slate-400 font-medium">Belum ditentukan</span>
-                    )}
+                        ))
+                      ) : (
+                        <span className="text-xs text-slate-400">Belum ditentukan</span>
+                      )}
+                    </div>
                   </div>
                 </div>
               );

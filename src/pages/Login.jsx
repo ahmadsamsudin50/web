@@ -14,23 +14,21 @@ export default function Login() {
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoading(true);
-    const loadingToast = toast.loading("Authenticating...");
+    const loadingToast = toast.loading("Memverifikasi kredensial...");
 
     try {
       const { data: userData, error: userError } = await supabase
         .from("users")
         .select("*")
-        .eq("email", email)
-        .eq("password", password)
+        .eq("email", email.trim())
+        .eq("password", password.trim())
         .single();
 
       if (userError || !userData) {
-        throw new Error("Invalid email address or password.");
+        throw new Error("Alamat email atau kata sandi tidak valid.");
       }
 
-      // ==========================================
-      // PENGECEKAN STATUS APPROVAL REGISTRASI
-      // ==========================================
+      // Pengecekan status pendaftaran akun
       if (userData.status === "pending") {
         throw new Error("Akun Anda sedang dalam proses peninjauan oleh admin.");
       }
@@ -39,17 +37,17 @@ export default function Login() {
         throw new Error("Pendaftaran akun Anda ditolak. Silakan mendaftar ulang.");
       }
 
-      // Jika status 'active', proses login dilanjutkan
+      // Simpan sesi login lokal tanpa menyertakan password
       const { password: _, ...safeUser } = userData;
       localStorage.setItem("user_session", JSON.stringify(safeUser));
 
-      toast.success("Welcome back!", { id: loadingToast });
+      toast.success("Selamat datang kembali!", { id: loadingToast });
 
       setTimeout(() => {
         if (userData.role === "admin") navigate("/admin");
         else if (userData.role === "student") navigate("/student");
         else if (userData.role === "coach") navigate("/coach");
-        else throw new Error("Unrecognized user role.");
+        else throw new Error("Peran pengguna tidak dikenali.");
       }, 500);
     } catch (error) {
       toast.error(error.message, { id: loadingToast });
@@ -64,21 +62,20 @@ export default function Login() {
         toastOptions={{ style: { borderRadius: "16px", fontWeight: "500" } }}
       />
 
-      {/* Ambient Background Glow */}
+      {/* Latar Belakang Ambient */}
       <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-blue-600 rounded-full mix-blend-screen filter blur-[120px] opacity-30 animate-pulse"></div>
       <div
         className="absolute bottom-[-10%] right-[-10%] w-96 h-96 bg-cyan-400 rounded-full mix-blend-screen filter blur-[120px] opacity-20 animate-pulse"
         style={{ animationDelay: "2s" }}
       ></div>
 
-      {/* Login Card */}
+      {/* Kartu Masuk */}
       <div className="w-full max-w-md bg-white rounded-[2.5rem] p-8 md:p-10 shadow-2xl relative z-10">
-        {/* Header/Logo */}
         <div className="text-center mb-10">
           <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-5 shadow-lg shadow-blue-600/30 transform -rotate-3 hover:rotate-0 transition-transform duration-300 overflow-hidden">
             <img
               src="/sirip_biru.webp"
-              alt="Siripbiru Logo"
+              alt="Logo Siripbiru"
               className="w-full h-full object-cover"
             />
           </div>
@@ -86,13 +83,11 @@ export default function Login() {
             Sirip<span className="text-blue-600">biru</span>
           </h1>
           <p className="text-slate-500 text-sm font-medium tracking-wide">
-            Portal Kehadiran Atlet
+            Portal Kehadiran Atlet & Instruktur
           </p>
         </div>
 
-        {/* Login Form */}
         <form onSubmit={handleLogin} className="space-y-5">
-          {/* Email Input */}
           <div className="space-y-1.5">
             <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest ml-1">
               Alamat Email
@@ -108,12 +103,11 @@ export default function Login() {
                 onChange={(e) => setEmail(e.target.value)}
                 disabled={loading}
                 className="w-full pl-11 pr-4 py-3.5 bg-slate-50 border border-slate-100 rounded-2xl text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all text-slate-700 font-medium"
-                placeholder="athlete@siripbiru.com"
+                placeholder="atlet@siripbiru.com"
               />
             </div>
           </div>
 
-          {/* Password Input */}
           <div className="space-y-1.5 pb-2">
             <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest ml-1">
               Kata Sandi
@@ -136,13 +130,13 @@ export default function Login() {
                 onClick={() => setShowPassword(!showPassword)}
                 disabled={loading}
                 className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-blue-600 transition-colors"
+                title={showPassword ? "Sembunyikan kata sandi" : "Tampilkan kata sandi"}
               >
                 {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
             </div>
           </div>
 
-          {/* Submit Button */}
           <button
             type="submit"
             disabled={loading}
@@ -165,7 +159,6 @@ export default function Login() {
           </button>
         </form>
 
-        {/* Footer info */}
         <div className="mt-8 text-center space-y-4">
           <p className="text-sm text-slate-600 font-medium">
             Belum punya akun?{" "}

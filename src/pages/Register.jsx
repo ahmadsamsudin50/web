@@ -1,6 +1,6 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { supabase } from "../utils/supabaseClient";
-import { useNavigate, Link } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { v4 as uuidv4 } from "uuid";
 import { toast, Toaster } from "react-hot-toast";
 import {
@@ -13,15 +13,14 @@ import {
   MapPin,
   Loader2,
   CheckCircle2,
+  Hash,
 } from "lucide-react";
 
 export default function Register() {
-  const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-
   const [form, setForm] = useState({
     full_name: "",
     email: "",
@@ -34,32 +33,56 @@ export default function Register() {
     address: "",
   });
 
+  const findAvailableNis = async () => {
+    try {
+      const { data, error } = await supabase.from("students").select("nis");
+      if (error) throw error;
+
+      const taken = new Set(
+        (data || [])
+          .map((s) => parseInt(String(s.nis).replace(/\D/g, ""), 10))
+          .filter((n) => !isNaN(n) && n > 0)
+      );
+
+      let candidate = 1;
+      while (taken.has(candidate)) {
+        candidate++;
+      }
+
+      setForm((prev) => ({ ...prev, nis: String(candidate) }));
+    } catch {
+      setForm((prev) => ({ ...prev, nis: "1" }));
+    }
+  };
+
+  useEffect(() => {
+    findAvailableNis();
+  }, []);
+
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
   };
 
   const handleRegister = async (e) => {
     e.preventDefault();
-
-    // Validasi Password
     if (form.password !== form.confirm_password) {
-      toast.error("Password dan Konfirmasi Password tidak cocok.");
+      toast.error("Kata sandi dan konfirmasi kata sandi tidak cocok.");
       return;
     }
     if (form.password.length < 6) {
-      toast.error("Password minimal terdiri dari 6 karakter.");
+      toast.error("Kata sandi minimal terdiri dari 6 karakter.");
       return;
     }
 
     setLoading(true);
     const loadingToast = toast.loading("Memproses pendaftaran...");
+    let createdUserId = null;
 
     try {
-      // 1. Cek apakah Email sudah terdaftar
       const { data: existingUser } = await supabase
         .from("users")
         .select("id, status")
-        .eq("email", form.email)
+        .eq("email", form.email.trim())
         .maybeSingle();
 
       if (existingUser) {
@@ -67,39 +90,32 @@ export default function Register() {
           throw new Error("Email ini sudah terdaftar dan sedang menunggu persetujuan admin.");
         }
         if (existingUser.status === "active") {
-          throw new Error("Email ini sudah terdaftar dan aktif. Silakan login.");
+          throw new Error("Email ini sudah terdaftar dan aktif. Silakan masuk.");
         }
         if (existingUser.status === "rejected") {
-          // Menghapus data pendaftar lama yang ditolak agar bisa daftar ulang
-          // (Data di tabel students akan otomatis terhapus karena ON DELETE CASCADE)
-          const { error: deleteErr } = await supabase
-            .from("users")
-            .delete()
-            .eq("id", existingUser.id);
-            
-          if (deleteErr) throw new Error("Gagal mereset data pendaftaran lama Anda.");
+          await supabase.from("students").delete().eq("user_id", existingUser.id);
+          await supabase.from("users").delete().eq("id", existingUser.id);
         }
       }
 
-      // 2. Cek apakah NIS sudah terdaftar (Pencegahan sebelum insert)
       const { data: existingNis } = await supabase
         .from("students")
         .select("id")
-        .eq("nis", form.nis)
+        .eq("nis", form.nis.trim())
         .maybeSingle();
 
       if (existingNis) {
-        throw new Error("Nomor Identitas (NIS) ini sudah terdaftar di sistem.");
+        await findAvailableNis();
+        throw new Error("Nomor urut NIS baru saja terpakai. Nomor telah diperbarui otomatis, silakan klik daftar lagi.");
       }
 
-      // 3. Insert ke tabel users dengan status 'pending'
       const { data: newUser, error: userError } = await supabase
         .from("users")
         .insert([
           {
-            email: form.email,
-            password: form.password,
-            full_name: form.full_name,
+            email: form.email.trim(),
+            password: form.password.trim(),
+            full_name: form.full_name.trim(),
             role: "student",
             status: "pending",
           },
@@ -108,56 +124,54 @@ export default function Register() {
         .single();
 
       if (userError) throw userError;
+      createdUserId = newUser.id;
 
-      // 4. Insert ke tabel students
       const { error: studentError } = await supabase.from("students").insert([
         {
           user_id: newUser.id,
-          nis: form.nis,
-          parent_name: form.parent_name,
-          phone_number: form.phone_number,
-          address: form.address,
-          age: form.age ? parseInt(form.age) : null,
+          nis: form.nis.trim(),
+          parent_name: form.parent_name.trim(),
+          phone_number: form.phone_number.trim(),
+          address: form.address.trim(),
+          age: form.age ? parseInt(form.age, 10) : null,
           qr_token: uuidv4(),
         },
       ]);
 
-      if (studentError) {
-        // Rollback user jika gagal insert student
-        await supabase.from("users").delete().eq("id", newUser.id);
-        throw studentError;
-      }
+      if (studentError) throw studentError;
 
-      // Berhasil
       toast.success("Pendaftaran berhasil dicatat!", { id: loadingToast });
       setSuccess(true);
     } catch (error) {
-      toast.error(error.message, { id: loadingToast });
+      if (createdUserId) {
+        await supabase.from("students").delete().eq("user_id", createdUserId);
+        await supabase.from("users").delete().eq("id", createdUserId);
+      }
+      toast.error(error.message || "Terjadi kesalahan pendaftaran.", { id: loadingToast });
     } finally {
       setLoading(false);
     }
   };
 
-  // Tampilan Sukses
   if (success) {
     return (
-      <div className="min-h-screen bg-[#0a192f] flex items-center justify-center p-4 relative overflow-hidden font-sans">
-        <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-blue-600 rounded-full mix-blend-screen filter blur-[120px] opacity-30 animate-pulse"></div>
-        <div className="absolute bottom-[-10%] right-[-10%] w-96 h-96 bg-emerald-400 rounded-full mix-blend-screen filter blur-[120px] opacity-20 animate-pulse"></div>
-        
-        <div className="w-full max-w-md bg-white rounded-[2.5rem] p-10 shadow-2xl relative z-10 flex flex-col items-center text-center">
-          <div className="w-20 h-20 bg-emerald-50 text-emerald-500 rounded-full flex items-center justify-center mb-6 ring-8 ring-emerald-50/50">
-            <CheckCircle2 size={40} />
+      <div className="min-h-screen bg-[#0a192f] flex items-center justify-center p-4 font-sans">
+        <div className="w-full max-w-md bg-white rounded-[2rem] p-8 md:p-10 shadow-2xl flex flex-col items-center text-center">
+          <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mb-6 ring-8 ring-emerald-50/50">
+            <CheckCircle2 size={36} />
           </div>
-          <h2 className="text-2xl font-black text-slate-800 mb-3">Registrasi Berhasil!</h2>
-          <p className="text-slate-500 font-medium mb-8 leading-relaxed">
-            Data Anda telah masuk ke sistem kami dan sedang <span className="font-bold text-blue-600">menunggu persetujuan admin</span>. Kami akan segera memproses pendaftaran Anda.
+          <h2 className="text-2xl font-black text-slate-800 mb-2">Pendaftaran Berhasil</h2>
+          <p className="text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1.5 rounded-full mb-3">
+            Nomor Induk Atlet: {form.nis}
+          </p>
+          <p className="text-slate-500 font-medium mb-8 text-sm leading-relaxed">
+            Data Anda telah tercatat dan sedang menunggu verifikasi oleh administrator.
           </p>
           <Link
             to="/login"
-            className="w-full py-4 px-4 bg-slate-900 hover:bg-black text-white font-bold rounded-2xl shadow-lg transition-all active:scale-[0.98]"
+            className="w-full py-3.5 px-4 bg-slate-900 hover:bg-black text-white font-bold rounded-xl shadow-lg transition-all text-sm"
           >
-            Kembali ke Halaman Login
+            Menuju Halaman Masuk
           </Link>
         </div>
       </div>
@@ -165,169 +179,245 @@ export default function Register() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0a192f] flex items-center justify-center p-4 md:p-8 relative overflow-hidden font-sans">
-      <Toaster
-        position="top-center"
-        toastOptions={{ style: { borderRadius: "16px", fontWeight: "500" } }}
-      />
-
-      {/* Ambient Background Glow */}
-      <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-blue-600 rounded-full mix-blend-screen filter blur-[120px] opacity-30 animate-pulse"></div>
-      <div
-        className="absolute bottom-[-10%] right-[-10%] w-96 h-96 bg-cyan-400 rounded-full mix-blend-screen filter blur-[120px] opacity-20 animate-pulse"
-        style={{ animationDelay: "2s" }}
-      ></div>
-
-      <div className="w-full max-w-4xl bg-white rounded-[2.5rem] shadow-2xl relative z-10 overflow-hidden flex flex-col md:flex-row">
-        
-        {/* Panel Kiri - Info */}
-        <div className="hidden md:flex md:w-1/3 bg-blue-600 p-10 flex-col justify-between relative overflow-hidden text-white">
-          <div className="absolute inset-0 bg-gradient-to-b from-blue-500 to-blue-700 opacity-90"></div>
-          
-          <div className="relative z-10">
-            <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mb-8 shadow-lg transform -rotate-3 overflow-hidden">
+    <div className="min-h-screen bg-[#0a192f] flex items-center justify-center p-4 md:p-8 font-sans">
+      <Toaster position="top-center" />
+      <div className="w-full max-w-4xl bg-white rounded-[2rem] shadow-2xl overflow-hidden flex flex-col md:flex-row">
+        <div className="hidden md:flex md:w-1/3 bg-blue-600 p-8 flex-col justify-between text-white">
+          <div>
+            <div className="w-14 h-14 bg-white rounded-2xl flex items-center justify-center mb-6 shadow-md overflow-hidden">
               <img src="/sirip_biru.webp" alt="Logo" className="w-full h-full object-cover" />
             </div>
-            <h1 className="text-3xl font-black tracking-tight mb-4">
-              Bergabung bersama Siripbiru.
+            <h1 className="text-2xl font-black tracking-tight mb-3">
+              Bergabung dengan Siripbiru
             </h1>
-            <p className="text-blue-100 font-medium leading-relaxed">
-              Lengkapi formulir pendaftaran atlet untuk membuat akun dan mengakses portal latihan digital Anda.
+            <p className="text-blue-100 text-sm leading-relaxed">
+              Lengkapi formulir pendaftaran atlet untuk mendapatkan kartu digital dan jadwal latihan resmi.
             </p>
           </div>
-
-          <div className="relative z-10">
-            <p className="text-sm font-medium text-blue-200">
-              Sudah memiliki akun aktif?
-            </p>
+          <div>
+            <p className="text-xs font-medium text-blue-200">Sudah memiliki akun?</p>
             <Link
               to="/login"
-              className="inline-block mt-3 px-6 py-2.5 bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl font-bold transition-all backdrop-blur-sm"
+              className="inline-block mt-2 px-5 py-2 bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl text-xs font-bold transition-colors"
             >
-              Sign In
+              Masuk Sekarang
             </Link>
           </div>
         </div>
 
-        {/* Panel Kanan - Form */}
-        <div className="w-full md:w-2/3 p-8 md:p-10 flex flex-col justify-center">
-          <div className="md:hidden text-center mb-8">
-            <h1 className="text-2xl font-black text-slate-800 tracking-tight">Register Athlete</h1>
-            <p className="text-slate-500 text-sm mt-1">Lengkapi data diri Anda di bawah ini</p>
+        <div className="w-full md:w-2/3 p-6 md:p-8 flex flex-col justify-center">
+          <div className="md:hidden text-center mb-6">
+            <h1 className="text-xl font-black text-slate-800 tracking-tight">Pendaftaran Atlet</h1>
+            <p className="text-slate-500 text-xs mt-1">Lengkapi data diri Anda di bawah ini</p>
           </div>
 
-          <form onSubmit={handleRegister} className="space-y-5">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-              
-              {/* Kolom Kiri Form */}
-              <div className="space-y-5">
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Nama Lengkap</label>
+          <form onSubmit={handleRegister} className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-3">
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">
+                    Nama Lengkap
+                  </label>
                   <div className="relative">
-                    <User size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input required name="full_name" value={form.full_name} onChange={handleChange} disabled={loading} className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-100 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all font-medium text-slate-700" placeholder="e.g. Budi Santoso" />
+                    <User size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      required
+                      name="full_name"
+                      value={form.full_name}
+                      onChange={handleChange}
+                      disabled={loading}
+                      className="w-full pl-10 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                      placeholder="Nama Lengkap"
+                    />
                   </div>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Email Address</label>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">
+                    Alamat Email
+                  </label>
                   <div className="relative">
-                    <Mail size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input required type="email" name="email" value={form.email} onChange={handleChange} disabled={loading} className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-100 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all font-medium text-slate-700" placeholder="athlete@mail.com" />
+                    <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      required
+                      type="email"
+                      name="email"
+                      value={form.email}
+                      onChange={handleChange}
+                      disabled={loading}
+                      className="w-full pl-10 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                      placeholder="alamat@email.com"
+                    />
                   </div>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Password</label>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">
+                    Kata Sandi
+                  </label>
                   <div className="relative">
-                    <Lock size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input required type={showPassword ? "text" : "password"} name="password" value={form.password} onChange={handleChange} disabled={loading} className="w-full pl-11 pr-11 py-3 bg-slate-50 border border-slate-100 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all font-medium text-slate-700" placeholder="Min. 6 karakter" />
-                    <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-blue-600 transition-colors">
+                    <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      required
+                      type={showPassword ? "text" : "password"}
+                      name="password"
+                      value={form.password}
+                      onChange={handleChange}
+                      disabled={loading}
+                      className="w-full pl-10 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                      placeholder="Minimal 6 karakter"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    >
                       {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
                   </div>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Konfirmasi Password</label>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">
+                    Konfirmasi Kata Sandi
+                  </label>
                   <div className="relative">
-                    <Lock size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input required type={showConfirmPassword ? "text" : "password"} name="confirm_password" value={form.confirm_password} onChange={handleChange} disabled={loading} className="w-full pl-11 pr-11 py-3 bg-slate-50 border border-slate-100 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all font-medium text-slate-700" placeholder="Ulangi password" />
-                    <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-blue-600 transition-colors">
+                    <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      required
+                      type={showConfirmPassword ? "text" : "password"}
+                      name="confirm_password"
+                      value={form.confirm_password}
+                      onChange={handleChange}
+                      disabled={loading}
+                      className="w-full pl-10 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                      placeholder="Ulangi kata sandi"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    >
                       {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
                   </div>
                 </div>
               </div>
 
-              {/* Kolom Kanan Form */}
-              <div className="space-y-5">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Nomor NIS</label>
-                    <input required name="nis" value={form.nis} onChange={handleChange} disabled={loading} className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all font-medium text-slate-700" placeholder="e.g. 2024001" />
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">
+                      NIS
+                    </label>
+                    <div className="relative">
+                      <Hash size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-blue-500" />
+                      <input
+                        readOnly
+                        name="nis"
+                        value={form.nis}
+                        className="w-full pl-8 pr-3 py-2.5 bg-blue-50/60 border border-blue-200 text-blue-800 font-bold font-mono rounded-xl text-xs sm:text-sm outline-none cursor-not-allowed"
+                        title="Nomor Induk Siswa dialokasikan otomatis dari nomor urut yang tersedia"
+                      />
+                    </div>
                   </div>
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Umur</label>
-                    <input required type="number" name="age" value={form.age} onChange={handleChange} disabled={loading} className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all font-medium text-slate-700" placeholder="e.g. 15" />
+
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">
+                      Usia (Th)
+                    </label>
+                    <input
+                      required
+                      type="number"
+                      name="age"
+                      value={form.age}
+                      onChange={handleChange}
+                      disabled={loading}
+                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                      placeholder="Contoh: 12"
+                    />
                   </div>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Nama Wali / Orang Tua</label>
-                  <input required name="parent_name" value={form.parent_name} onChange={handleChange} disabled={loading} className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all font-medium text-slate-700" placeholder="Nama wali" />
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">
+                    Nama Orang Tua / Wali
+                  </label>
+                  <input
+                    required
+                    name="parent_name"
+                    value={form.parent_name}
+                    onChange={handleChange}
+                    disabled={loading}
+                    className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                    placeholder="Nama orang tua/wali"
+                  />
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">No. Handphone (WA)</label>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">
+                    Nomor WhatsApp
+                  </label>
                   <div className="relative">
-                    <Phone size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input required name="phone_number" value={form.phone_number} onChange={handleChange} disabled={loading} className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-100 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all font-medium text-slate-700" placeholder="+62 812..." />
+                    <Phone size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      required
+                      name="phone_number"
+                      value={form.phone_number}
+                      onChange={handleChange}
+                      disabled={loading}
+                      className="w-full pl-10 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                      placeholder="08..."
+                    />
                   </div>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Alamat Lengkap</label>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">
+                    Alamat Rumah
+                  </label>
                   <div className="relative">
-                    <MapPin size={16} className="absolute left-4 top-4 text-slate-400" />
-                    <textarea required name="address" value={form.address} onChange={handleChange} disabled={loading} rows={2} className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-100 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all font-medium text-slate-700 resize-none" placeholder="Detail alamat rumah..." />
+                    <MapPin size={16} className="absolute left-3 top-3 text-slate-400" />
+                    <textarea
+                      required
+                      name="address"
+                      value={form.address}
+                      onChange={handleChange}
+                      disabled={loading}
+                      rows={2}
+                      className="w-full pl-10 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-none font-medium"
+                      placeholder="Alamat lengkap"
+                    />
                   </div>
                 </div>
               </div>
-
             </div>
 
-            <div className="pt-4 border-t border-slate-100 mt-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <p className="text-xs text-slate-400 font-medium md:max-w-xs text-center md:text-left">
-                Dengan mendaftar, Anda menyetujui akun Anda akan diverifikasi secara manual oleh admin.
+            <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <p className="text-[11px] text-slate-400 text-center sm:text-left">
+                Akun akan diverifikasi secara manual oleh pihak pengelola.
               </p>
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full md:w-auto py-3.5 px-8 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg shadow-blue-600/30 transition-all active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                className="w-full sm:w-auto py-3 px-6 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg shadow-blue-600/20 transition-all flex items-center justify-center gap-2 text-sm active:scale-95 disabled:opacity-50"
               >
                 {loading ? (
                   <>
-                    <Loader2 size={18} className="animate-spin" />
-                    Memproses...
+                    <Loader2 size={16} className="animate-spin" /> Memproses...
                   </>
                 ) : (
                   "Daftar Sekarang"
                 )}
               </button>
             </div>
-            
-            {/* Tautan Login khusus versi Mobile */}
-            <div className="md:hidden text-center mt-6">
-               <p className="text-sm text-slate-600 font-medium">
-                  Sudah memiliki akun?{" "}
-                  <Link to="/login" className="text-blue-600 font-bold hover:underline transition-all">
-                    Login di sini
-                  </Link>
-               </p>
+
+            <div className="md:hidden text-center mt-3">
+              <Link to="/login" className="text-xs text-blue-600 font-bold hover:underline">
+                Sudah memiliki akun? Masuk di sini
+              </Link>
             </div>
           </form>
-
         </div>
       </div>
     </div>

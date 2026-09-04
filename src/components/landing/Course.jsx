@@ -1,13 +1,14 @@
-import React, { useEffect, useRef, useState } from "react";
-import { Check, Droplets, Activity, Medal, Star } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { Check, Droplets, Activity, Medal, Star, Sparkles, ChevronRight, ChevronDown, ChevronUp } from "lucide-react";
 import { supabase } from "../../utils/supabaseClient";
 
-// Peta ikon agar nama ikon dari database berubah jadi komponen Lucide
 const iconMap = { Droplets, Activity, Medal, Star };
 
 export default function Course() {
   const [courses, setCourses] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -16,367 +17,190 @@ export default function Course() {
         const { data } = await supabase
           .from("landing_courses")
           .select("*")
-          .eq("is_active", true)
-          .order("created_at");
+          .order("created_at", { ascending: true });
         if (mounted) setCourses(data || []);
       } catch (e) {
-        console.error(e);
         if (mounted) setCourses([]);
       } finally {
         if (mounted) setLoading(false);
       }
     };
     fetchCourses();
-    return () => (mounted = false);
-  }, []);
-
-  // Responsive visible count
-  const [visible, setVisible] = useState(3);
-  const resizeTimeout = useRef(null);
-  useEffect(() => {
-    const calc = () => {
-      const w = window.innerWidth;
-      setVisible(w >= 1024 ? 3 : w >= 640 ? 2 : 1);
-    };
-    calc();
-    const onResize = () => {
-      clearTimeout(resizeTimeout.current);
-      resizeTimeout.current = setTimeout(calc, 150);
-    };
-    window.addEventListener("resize", onResize);
     return () => {
-      window.removeEventListener("resize", onResize);
-      clearTimeout(resizeTimeout.current);
+      mounted = false;
     };
   }, []);
 
-  // If not enough items to need carousel, render static grid (edge case)
-  if (!loading && courses.length <= visible) {
-    return (
-      <section
-        id="course"
-        className="relative py-24 px-6 bg-[#0A192F] overflow-hidden border-t border-[#00E5FF]/20"
-      >
-        <div className="absolute inset-0 z-0 opacity-10 mix-blend-overlay">
-          <img
-            src="https://images.unsplash.com/photo-1519315901367-f34ff9154487?q=80&w=2070&auto=format&fit=crop"
-            alt="Water background"
-            className="w-full h-full object-cover"
-          />
-        </div>
-        <div className="relative z-10 max-w-7xl mx-auto">
-          <div className="text-center mb-20">
-            <h2 className="text-[10px] font-bold text-[#00E5FF] uppercase tracking-[0.2em] mb-4 flex items-center justify-center gap-2">
-              Program Siripbiru <span className="text-white/30">^</span>
-            </h2>
-            <svg
-              width="60"
-              height="10"
-              viewBox="0 0 60 10"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-              className="mx-auto mb-6"
-            >
-              <path
-                d="M0 5C5 5 5 0 10 0C15 0 15 5 20 5C25 5 25 10 30 10C35 10 35 5 40 5C45 5 45 0 50 0C55 0 55 5 60 5"
-                stroke="#00E5FF"
-                strokeWidth="2"
-              />
-            </svg>
-          </div>
+  // Deteksi tampilan mobile vs desktop
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 640);
+    };
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
-          <div className="grid md:grid-cols-3 gap-16 md:gap-8">
-            {courses.map((c) => {
-              const Icon = iconMap[c.icon_name] || Star; // Tentukan Ikon
+  // Batas jumlah kartu awal: 1 untuk mobile, 3 untuk desktop
+  const initialLimit = isMobile ? 1 : 3;
+  const displayedCourses = isExpanded ? courses : courses.slice(0, initialLimit);
+  const canToggle = courses.length > initialLimit;
+
+  return (
+    <section
+      id="course"
+      className="relative py-24 lg:py-32 px-6 bg-[#0a192f] overflow-hidden font-sans text-white border-t border-slate-800"
+    >
+      {/* Efek Cahaya Latar */}
+      <div className="absolute top-1/4 -left-32 w-96 h-96 bg-blue-600/20 rounded-full blur-[120px] pointer-events-none"></div>
+      <div className="absolute bottom-10 -right-32 w-96 h-96 bg-cyan-500/15 rounded-full blur-[120px] pointer-events-none"></div>
+
+      <div className="relative z-10 max-w-7xl mx-auto">
+        {/* Header Bagian */}
+        <div className="text-center max-w-2xl mx-auto mb-16 lg:mb-20">
+          <span className="text-xs font-black uppercase tracking-[0.25em] text-cyan-300 bg-cyan-950/80 border border-cyan-500/30 px-4 py-1.5 rounded-full inline-flex items-center gap-2 mb-4 shadow-sm">
+            <Sparkles size={13} className="text-cyan-400" /> Program Pelatihan
+          </span>
+          <h3 className="text-3xl sm:text-4xl md:text-5xl font-black text-white tracking-tight leading-tight">
+            Pilihan Kelas <span className="text-cyan-400">Renang Terbaik</span>
+          </h3>
+          <p className="text-slate-400 text-sm md:text-base mt-3 font-medium leading-relaxed">
+            Kurikulum bertingkat yang dirancang terstruktur dari pengenalan air hingga persiapan kejuaraan profesional.
+          </p>
+        </div>
+
+        {/* Grid Kartu Program */}
+        {loading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            {[1, 2, 3].map((i) => (
+              <div
+                key={i}
+                className="h-[460px] rounded-[2.5rem] bg-white/[0.03] border border-white/10 animate-pulse p-8"
+              ></div>
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 items-stretch">
+            {displayedCourses.map((c, idx) => {
+              const Icon = iconMap[c.icon_name] || Star;
+              const isPopular = idx === 1;
+
               return (
-                <div key={c.id} className="flex flex-col items-center text-center group">
-                  <div className="mb-6 text-[#00E5FF] transform group-hover:-translate-y-2 transition-transform duration-300">
-                    <Icon size={48} strokeWidth={1} />
+                <div
+                  key={c.id}
+                  className={`relative rounded-[2.5rem] p-8 flex flex-col justify-between transition-all duration-300 group hover:-translate-y-2 ${
+                    isPopular
+                      ? "bg-gradient-to-b from-blue-900/60 to-[#0d223f] border-2 border-cyan-400/80 shadow-2xl shadow-cyan-500/10"
+                      : "bg-white/[0.03] hover:bg-white/[0.06] border border-white/10 hover:border-cyan-400/40 shadow-xl"
+                  }`}
+                >
+                  {/* Badge Unggulan */}
+                  {isPopular && (
+                    <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 bg-gradient-to-r from-cyan-400 to-blue-500 text-[#0a192f] text-[10px] font-black uppercase tracking-widest px-4 py-1 rounded-full shadow-md">
+                      Paling Diminati
+                    </div>
+                  )}
+
+                  <div>
+                    {/* Header Kartu */}
+                    <div className="flex items-center justify-between gap-4 mb-6">
+                      <div
+                        className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-colors ${
+                          isPopular
+                            ? "bg-cyan-400 text-slate-950 shadow-lg shadow-cyan-400/20"
+                            : "bg-white/10 text-cyan-400 group-hover:bg-cyan-400 group-hover:text-slate-950"
+                        }`}
+                      >
+                        <Icon size={26} strokeWidth={2} />
+                      </div>
+                      <div className="text-right">
+                        <span className="text-2xl font-black text-white tracking-tight">
+                          {c.price}
+                        </span>
+                        <span className="block text-[11px] text-slate-400 font-medium">
+                          per periode paket
+                        </span>
+                      </div>
+                    </div>
+
+                    <h4 className="text-xl font-bold text-white mb-2 tracking-tight group-hover:text-cyan-300 transition-colors">
+                      {c.title}
+                    </h4>
+
+                    <p className="text-xs text-slate-400 leading-relaxed mb-6 font-normal min-h-[38px] line-clamp-2">
+                      {c.description}
+                    </p>
+
+                    <div className="h-px bg-white/10 mb-6"></div>
+
+                    {/* Daftar Fasilitas */}
+                    <div className="space-y-3 mb-8">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                        Fasilitas Termasuk:
+                      </p>
+                      <ul className="space-y-2.5">
+                        {c.features?.map((f, i) => (
+                          <li
+                            key={i}
+                            className="flex items-start gap-2.5 text-xs text-slate-300 font-medium"
+                          >
+                            <div className="w-4 h-4 rounded-full bg-cyan-400/20 text-cyan-300 flex items-center justify-center shrink-0 mt-0.5">
+                              <Check size={11} strokeWidth={3} />
+                            </div>
+                            <span>{f}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
                   </div>
-                  <h4 className="text-2xl font-serif text-white mb-2">{c.title}</h4>
-                  <div className="flex flex-col items-center gap-2 mb-6 w-full">
-                    <span className="text-sm font-bold text-[#00E5FF] uppercase tracking-widest">{c.price} / bln</span>
-                    <div className="w-12 h-[1px] bg-white/20 mt-2"></div>
-                  </div>
-                  <p className="text-sm text-white/60 mb-8 max-w-xs leading-relaxed line-clamp-3">{c.description}</p>
-                  <ul className="space-y-3 text-left w-full max-w-[220px]">
-                    {c.features?.map((f, idx) => (
-                      <li key={idx} className="flex items-start gap-3 text-[13px] text-white/80">
-                        <Check size={16} className="text-[#00E5FF] flex-shrink-0 mt-0.5" /> {f}
-                      </li>
-                    ))}
-                  </ul>
+
+                  {/* Tombol Aksi */}
+                  <a
+                    href="/register"
+                    className={`w-full py-3.5 px-4 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 transition-all active:scale-95 shadow-md ${
+                      isPopular
+                        ? "bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-black shadow-cyan-400/20"
+                        : "bg-white/10 hover:bg-white/20 text-white border border-white/10"
+                    }`}
+                  >
+                    Daftar Kelas Ini
+                    <ChevronRight size={15} />
+                  </a>
                 </div>
               );
             })}
           </div>
-        </div>
-      </section>
-    );
-  }
+        )}
 
-  // CAROUSEL STATE
-  const viewportRef = useRef(null);
-  const trackRef = useRef(null);
-  const [index, setIndex] = useState(0);
-  const dragging = useRef(false);
-  const startX = useRef(0);
-  const currentTranslate = useRef(0);
-  const prevTranslate = useRef(0);
-  const lastTime = useRef(0);
-  const velocity = useRef(0);
-  const cardWidthRef = useRef(0);
-  const gapRef = useRef(20);
-  const lastVisibleRef = useRef(visible);
-
-  const maxIndex = Math.max(0, courses.length - visible);
-
-  const getSlideWidth = () => {
-    // return full step including gap
-    return (cardWidthRef.current || 0) + (gapRef.current || 0);
-  };
-
-  // update transform
-  const setTrackTransform = (value, withTransition = false) => {
-    const t = trackRef.current;
-    if (!t) return;
-    t.style.transition = withTransition ? "transform 350ms ease-in-out" : "none";
-    t.style.transform = `translateX(${value}px)`;
-  };
-
-  // set to index
-  const goToIndex = (i) => {
-    const clamped = Math.max(0, Math.min(i, maxIndex));
-    setIndex(clamped);
-    const sw = getSlideWidth();
-    prevTranslate.current = -clamped * sw;
-    currentTranslate.current = prevTranslate.current;
-    setTrackTransform(currentTranslate.current, true);
-  };
-
-  useEffect(() => {
-    // initialize to index 0
-    // compute card width and gap then set index within bounds
-    const computeLayout = () => {
-      const vp = viewportRef.current;
-      if (!vp) return;
-      const cw = vp.clientWidth;
-      // gap per breakpoint
-      const gap = visible === 3 ? 24 : visible === 2 ? 20 : 12;
-      gapRef.current = gap;
-      let cardW;
-      // mobile peek behavior (only when visible===1)
-      if (visible === 1 && cw < 640) {
-        const peek = 0.12; // 12% peek of viewport
-        cardW = Math.round(cw * (1 - peek));
-      } else {
-        // distribute remaining width after gaps evenly
-        cardW = Math.round((cw - gap * (visible - 1)) / visible);
-      }
-      cardWidthRef.current = cardW;
-      // clamp index to valid range
-      const maxIdx = Math.max(0, courses.length - visible);
-      const newIdx = Math.max(0, Math.min(index, maxIdx));
-      // reset previous translate and apply
-      prevTranslate.current = -newIdx * (cardW + gap);
-      currentTranslate.current = prevTranslate.current;
-      setIndex(newIdx);
-      setTrackTransform(currentTranslate.current, false);
-    };
-
-    computeLayout();
-    lastVisibleRef.current = visible;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, courses.length]);
-
-  // pointer handlers for drag (mouse & touch unified)
-  useEffect(() => {
-    const vp = viewportRef.current;
-    if (!vp) return;
-
-    const onPointerDown = (e) => {
-      dragging.current = true;
-      vp.setPointerCapture(e.pointerId);
-      startX.current = e.clientX;
-      lastTime.current = performance.now();
-      velocity.current = 0;
-      prevTranslate.current = currentTranslate.current;
-      setTrackTransform(currentTranslate.current, false);
-      // pause autoplay if any (not implemented here)
-    };
-
-    const onPointerMove = (e) => {
-      if (!dragging.current) return;
-      const dx = e.clientX - startX.current;
-      const now = performance.now();
-      const dt = now - lastTime.current || 16;
-      const newTranslate = prevTranslate.current + dx;
-      currentTranslate.current = newTranslate;
-      setTrackTransform(currentTranslate.current, false);
-      velocity.current = (e.clientX - (startX.current + (prevTranslate.current - currentTranslate.current))) / dt; // approximate
-      lastTime.current = now;
-    };
-
-    const onPointerUp = (e) => {
-      if (!dragging.current) return;
-      dragging.current = false;
-      try { vp.releasePointerCapture(e.pointerId); } catch (err) {}
-      // compute swipe distance and velocity
-      const dx = currentTranslate.current - prevTranslate.current;
-      const step = getSlideWidth() || 1;
-      // determine target index using velocity + position
-      const movedSlides = -currentTranslate.current / step;
-      let target = Math.round(movedSlides);
-      // momentum: if velocity significant, push further
-      const v = (e.velocityX || velocity.current) || 0;
-      const veloThreshold = 0.3; // px/ms approx
-      if (Math.abs(v) > veloThreshold) {
-        target += v < 0 ? 1 : -1;
-      } else {
-        // also threshold by pixel
-        const pxDiff = (currentTranslate.current - prevTranslate.current);
-        if (Math.abs(pxDiff) > 80) target += pxDiff < 0 ? 1 : -1;
-      }
-      target = Math.max(0, Math.min(target, maxIndex));
-      goToIndex(target);
-    };
-
-    vp.addEventListener("pointerdown", onPointerDown);
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp);
-    window.addEventListener("pointercancel", onPointerUp);
-
-    return () => {
-      vp.removeEventListener("pointerdown", onPointerDown);
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", onPointerUp);
-      window.removeEventListener("pointercancel", onPointerUp);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, courses.length]);
-
-  // navigation handlers
-  const prev = () => goToIndex(index - 1);
-  const next = () => goToIndex(index + 1);
-
-  // keyboard
-  const onKeyDown = (e) => {
-    if (e.key === "ArrowLeft") prev();
-    if (e.key === "ArrowRight") next();
-  };
-
-  // render skeleton when loading
-  const skeletonCount = 3;
-
-  return (
-    <section id="course" className="relative py-24 px-6 bg-[#0A192F] overflow-hidden border-t border-[#00E5FF]/20">
-      <div className="absolute inset-0 z-0 opacity-10 mix-blend-overlay">
-        <img
-          src="https://images.unsplash.com/photo-1519315901367-f34ff9154487?q=80&w=2070&auto=format&fit=crop"
-          alt="Water background"
-          className="w-full h-full object-cover"
-        />
-      </div>
-
-      <div className="relative z-10 max-w-7xl mx-auto">
-        <div className="text-center mb-8">
-          <h2 className="text-[10px] font-bold text-[#00E5FF] uppercase tracking-[0.2em] mb-4 flex items-center justify-center gap-2">
-            Siripbiru Programs <span className="text-white/30">^</span>
-          </h2>
-          <svg width="60" height="10" viewBox="0 0 60 10" fill="none" xmlns="http://www.w3.org/2000/svg" className="mx-auto mb-6">
-            <path d="M0 5C5 5 5 0 10 0C15 0 15 5 20 5C25 5 25 10 30 10C35 10 35 5 40 5C45 5 45 0 50 0C55 0 55 5 60 5" stroke="#00E5FF" strokeWidth="2" />
-          </svg>
-        </div>
-
-        {/* Carousel viewport */}
-        <div className="relative">
-          <div className="flex items-center justify-between mb-4">
-            <div />
-            <div className="hidden md:flex items-center gap-3">
-              <button aria-label="Slide sebelumnya" onClick={prev} className="w-11 h-11 min-w-[44px] min-h-[44px] rounded-full bg-white/6 text-white flex items-center justify-center">‹</button>
-              <button aria-label="Slide berikutnya" onClick={next} className="w-11 h-11 min-w-[44px] min-h-[44px] rounded-full bg-white/6 text-white flex items-center justify-center">›</button>
-            </div>
+        {courses.length === 0 && !loading && (
+          <div className="text-center py-16 bg-white/5 rounded-3xl border border-white/10 max-w-md mx-auto">
+            <p className="text-slate-400 text-sm font-medium">
+              Belum ada paket program yang dipublikasikan.
+            </p>
           </div>
+        )}
 
-          <div
-            ref={viewportRef}
-            className="course-viewport relative"
-            style={{ overflow: "hidden" }}
-            onKeyDown={onKeyDown}
-            tabIndex={0}
-            role="region"
-            aria-label="Carousel program"
-          >
-            <div
-              ref={trackRef}
-              className="course-track flex"
-              style={{
-                willChange: "transform",
-                touchAction: "pan-y",
-                display: "flex",
-                flexWrap: "nowrap",
-                alignItems: "flex-start",
-              }}
-              aria-live="polite"
+        {/* Tombol Muat Lebih Banyak / Tutup */}
+        {!loading && canToggle && (
+          <div className="mt-14 flex justify-center">
+            <button
+              onClick={() => setIsExpanded(!isExpanded)}
+              className="inline-flex items-center gap-2.5 px-7 py-3.5 rounded-full bg-white/10 hover:bg-white/20 border border-white/15 text-cyan-300 font-bold text-xs tracking-wider uppercase transition-all duration-300 active:scale-95 shadow-lg backdrop-blur-md"
             >
-              {loading
-                ? Array.from({ length: skeletonCount }).map((_, i, arr) => {
-                    const cw = cardWidthRef.current || (viewportRef.current ? Math.round(viewportRef.current.clientWidth / visible) : 0);
-                    const gap = gapRef.current || 20;
-                    const isLast = i === arr.length - 1;
-                    const style = { width: cw ? `${cw}px` : `${100 / visible}%`, padding: 12, boxSizing: "border-box", marginRight: isLast ? 0 : `${gap}px`, flex: '0 0 auto' };
-                    return (
-                      <div key={i} style={style}>
-                        <div className="bg-white/6 rounded-xl p-6 min-h-[320px] animate-pulse"></div>
-                      </div>
-                    );
-                  })
-                : courses.map((c, idx) => {
-                    const Icon = iconMap[c.icon_name] || Star;
-                    const cw = cardWidthRef.current || (viewportRef.current ? Math.round(viewportRef.current.clientWidth / visible) : 0);
-                    const gap = gapRef.current || 20;
-                    const isLast = idx === courses.length - 1;
-                    const outerStyle = { width: cw ? `${cw}px` : `${100 / visible}%`, padding: 12, boxSizing: "border-box", marginRight: isLast ? 0 : `${gap}px`, flex: '0 0 auto' };
-                    return (
-                      <div key={c.id} style={outerStyle}>
-                        <div className="flex flex-col items-center text-center group bg-[#0A192F] rounded-xl p-6" style={{ minHeight: 320 }}>
-                          <div className="mb-6 text-[#00E5FF] transition-transform duration-300 group-hover:-translate-y-2">
-                            <Icon size={48} strokeWidth={1} />
-                          </div>
-                          <h4 className="text-2xl font-serif text-white mb-2">{c.title}</h4>
-                          <div className="flex flex-col items-center gap-2 mb-6 w-full">
-                            <span className="text-sm font-bold text-[#00E5FF] uppercase tracking-widest">{c.price} / bln</span>
-                            <div className="w-12 h-[1px] bg-white/20 mt-2"></div>
-                          </div>
-                          <p className="text-sm text-white/60 mb-6 max-w-xs leading-relaxed line-clamp-3">{c.description}</p>
-                          <ul className="space-y-3 text-left w-full max-w-[220px] mt-auto">
-                            {c.features?.map((f, idx) => (
-                              <li key={idx} className="flex items-start gap-3 text-[13px] text-white/80">
-                                <Check size={16} className="text-[#00E5FF] flex-shrink-0 mt-0.5" /> {f}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      </div>
-                    );
-                  })}
-            </div>
+              {isExpanded ? (
+                <>
+                  <span>Tutup</span>
+                  <ChevronUp size={16} />
+                </>
+              ) : (
+                <>
+                  <span>Muat Lebih Banyak</span>
+                  <ChevronDown size={16} />
+                </>
+              )}
+            </button>
           </div>
-
-          {/* dots */}
-          {!loading && (
-            <div className="flex items-center justify-center gap-3 mt-6">
-              {Array.from({ length: courses.length - visible + 1 > 0 ? courses.length - visible + 1 : 1 }).map((_, i) => (
-                <button
-                  key={i}
-                  onClick={() => goToIndex(i)}
-                  aria-label={`Ke program ${i + 1}`}
-                  className={`w-3 h-3 rounded-full ${i === index ? 'bg-[#00E5FF]' : 'bg-white/30'}`}
-                />
-              ))}
-            </div>
-          )}
-        </div>
+        )}
       </div>
     </section>
   );
