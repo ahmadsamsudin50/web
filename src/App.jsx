@@ -6,7 +6,6 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import AuthGuard from './components/AuthGuard';
 import LayoutAdmin from './components/LayoutAdmin';
-import LayoutStudent from './pages/student/Profile'; // Tergantung struktur import Anda, pastikan path benar
 import LayoutStudentComponent from './components/LayoutStudent';
 import LayoutCoach from "./components/LayoutCoach";
 
@@ -21,7 +20,7 @@ import SessionManage from './pages/admin/SessionManage';
 import ScanQR from './pages/admin/ScanQR';
 import ManualEntry from './pages/admin/ManualEntry';
 import Recap from './pages/admin/Recap';
-import AnnouncementManage from './pages/admin/AnnouncementManage'; // <-- IMPORT BARU
+import AnnouncementManage from './pages/admin/AnnouncementManage';
 
 // Halaman Student
 import Profile from './pages/student/Profile';
@@ -63,7 +62,7 @@ function App() {
           <Route path="scan" element={<ScanQR />} />
           <Route path="manual-entry" element={<ManualEntry />} />
           <Route path="recap" element={<Recap />} />
-          <Route path="announcements" element={<AnnouncementManage />} /> {/* <-- ROUTE BARU */}
+          <Route path="announcements" element={<AnnouncementManage />} />
         </Route>
 
         {/* ============================================== */}
@@ -98,6 +97,9 @@ function App() {
           <Route path="schedule" element={<CoachSchedule />} />
           <Route path="logs" element={<CoachLogs />} />
         </Route>
+
+        {/* Fallback route jika halaman tidak ditemukan */}
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
   );

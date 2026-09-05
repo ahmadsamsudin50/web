@@ -32,7 +32,6 @@ export default function Login() {
       if (userData.status === "pending") {
         throw new Error("Akun Anda sedang dalam proses peninjauan oleh admin.");
       }
-
       if (userData.status === "rejected") {
         throw new Error("Pendaftaran akun Anda ditolak. Silakan mendaftar ulang.");
       }
@@ -61,7 +60,6 @@ export default function Login() {
         position="top-center"
         toastOptions={{ style: { borderRadius: "16px", fontWeight: "500" } }}
       />
-
       {/* Latar Belakang Ambient */}
       <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-blue-600 rounded-full mix-blend-screen filter blur-[120px] opacity-30 animate-pulse"></div>
       <div

@@ -22,7 +22,6 @@ export default function Enrollment() {
   const [studentId, setStudentId] = useState(null);
   const [classes, setClasses] = useState([]);
   const [payments, setPayments] = useState([]);
-
   const [selectedClassId, setSelectedClassId] = useState("");
   const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
@@ -48,7 +47,6 @@ export default function Enrollment() {
         .select("id")
         .eq("user_id", user.id)
         .single();
-
       if (studentError || !student) throw new Error("Data atlet tidak ditemukan.");
       setStudentId(student.id);
 
@@ -61,25 +59,21 @@ export default function Enrollment() {
         `)
         .eq("student_id", student.id)
         .order("created_at", { ascending: false });
-
       if (payError) throw payError;
       setPayments(paymentData || []);
 
       // 3. Ambil pendaftaran kelas yang saat ini SEDANG AKTIF
-      // Catatan: Kelas berstatus 'completed' sengaja TIDAK dikecualikan agar atlet bisa mendaftar ulang
       const { data: activeEnrollments } = await supabase
         .from("student_enrollments")
         .select("class_id")
         .eq("student_id", student.id)
         .eq("status", "active");
-
       const activeClassIds = activeEnrollments?.map((e) => e.class_id) || [];
 
       // Kecualikan kelas yang pembayarannya masih menunggu verifikasi admin
       const pendingPayIds = paymentData
         ?.filter((p) => p.status === "pending")
         .map((p) => p.class_id) || [];
-
       const excludedClassIds = [...activeClassIds, ...pendingPayIds];
 
       // 4. Ambil data seluruh kelas dan hitung sisa kuota kapasitas
@@ -87,7 +81,6 @@ export default function Enrollment() {
         supabase.from("classes").select("id, name, price, max_capacity, max_sessions"),
         supabase.from("student_enrollments").select("class_id").eq("status", "active"),
       ]);
-
       if (classRes.error) throw classRes.error;
       if (allEnrollRes.error) throw allEnrollRes.error;
 
@@ -110,7 +103,6 @@ export default function Enrollment() {
             is_full: remainingSeats <= 0,
           };
         });
-
       setClasses(availableClasses);
     } catch (error) {
       toast.error(error.message);
@@ -134,15 +126,16 @@ export default function Enrollment() {
     const selectedFile = e.target.files[0];
     if (!selectedFile) return;
 
-    if (selectedFile.size > 2 * 1024 * 1024) {
-      toast.error("Ukuran file tidak boleh melebihi 2MB.");
+    // Batas file dinaikkan menjadi 4MB (4 * 1024 * 1024 bytes)
+    if (selectedFile.size > 4 * 1024 * 1024) {
+      toast.error("Ukuran file tidak boleh melebihi 4MB.");
       fileInputRef.current.value = "";
       return;
     }
 
-    const validTypes = ["image/jpeg", "image/png", "image/jpg"];
+    const validTypes = ["image/jpeg", "image/png", "image/jpg", "image/webp"];
     if (!validTypes.includes(selectedFile.type)) {
-      toast.error("Hanya file JPG dan PNG yang diizinkan.");
+      toast.error("Hanya file JPG, PNG, dan WebP yang diizinkan.");
       fileInputRef.current.value = "";
       return;
     }
@@ -165,6 +158,7 @@ export default function Enrollment() {
 
     setSubmitting(true);
     const loadingToast = toast.loading("Mengunggah data pembayaran...");
+
     try {
       const fileExt = file.name.split(".").pop();
       const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
@@ -174,11 +168,12 @@ export default function Enrollment() {
         .from("images")
         .upload(filePath, file);
 
-      if (uploadError) throw new Error("Gagal mengunggah gambar bukti transfer.");
+      if (uploadError) throw new Error("Gagal mengunggah gambar bukti transfer: " + uploadError.message);
 
       const { data: urlData } = supabase.storage
         .from("images")
         .getPublicUrl(filePath);
+
       const receiptUrl = urlData.publicUrl;
 
       const { error: insertError } = await supabase.from("payments").insert([
@@ -307,6 +302,7 @@ export default function Enrollment() {
             <h2 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-4 flex items-center gap-2">
               <BookOpen size={16} className="text-blue-600" /> Formulir Pendaftaran
             </h2>
+
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">
@@ -370,16 +366,16 @@ export default function Enrollment() {
                   Unggah Bukti Transfer
                 </label>
                 {!previewUrl ? (
-                  <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-slate-200 bg-slate-50 rounded-xl hover:bg-slate-100 cursor-pointer">
+                  <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-slate-200 bg-slate-50 rounded-xl hover:bg-slate-100 cursor-pointer transition-colors">
                     <UploadCloud size={24} className="text-slate-400 mb-2" />
                     <p className="text-xs text-slate-600 font-medium">Klik untuk memilih file</p>
-                    <p className="text-[10px] text-slate-400 mt-0.5">JPG atau PNG (Maksimal 2MB)</p>
+                    <p className="text-[10px] text-slate-400 mt-0.5">JPG, PNG, atau WebP (Maksimal 4MB)</p>
                     <input
                       type="file"
                       className="hidden"
                       ref={fileInputRef}
                       onChange={handleFileChange}
-                      accept="image/jpeg, image/png, image/jpg"
+                      accept="image/jpeg, image/png, image/jpg, image/webp"
                     />
                   </label>
                 ) : (
@@ -388,7 +384,7 @@ export default function Enrollment() {
                     <button
                       type="button"
                       onClick={clearFile}
-                      className="absolute top-2 right-2 p-1.5 bg-rose-600 text-white rounded-full shadow-md"
+                      className="absolute top-2 right-2 p-1.5 bg-rose-600 text-white rounded-full shadow-md hover:bg-rose-700 transition-colors"
                     >
                       <Trash2 size={16} />
                     </button>
@@ -399,7 +395,7 @@ export default function Enrollment() {
               <button
                 type="submit"
                 disabled={submitting || !selectedClassId || selectedClassDetails?.is_full || !file}
-                className="w-full py-3 bg-slate-900 hover:bg-black text-white font-bold rounded-xl shadow-md transition-all text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full py-3 bg-slate-900 hover:bg-black text-white font-bold rounded-xl shadow-md transition-all text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
               >
                 {submitting ? "Mengirim..." : selectedClassDetails?.is_full ? "Kelas Penuh" : "Kirim Pembayaran"}
               </button>
