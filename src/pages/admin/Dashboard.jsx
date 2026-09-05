@@ -8,6 +8,8 @@ import {
   TrendingUp,
   BarChart3,
   Loader2,
+  HardDrive,
+  Database,
 } from "lucide-react";
 import {
   AreaChart,
@@ -29,6 +31,17 @@ export default function Dashboard() {
     activeSessions: 0,
     totalLogs: 0,
   });
+  const [storageUsage, setStorageUsage] = useState({
+    usedMb: 0,
+    maxMb: 1024,
+    percent: 0,
+    fileCount: 0,
+  });
+  const [dbUsage, setDbUsage] = useState({
+    usedMb: 0,
+    maxMb: 500, // Kuota Free Tier Database Supabase (500 MB)
+    percent: 0,
+  });
   const [trendData, setTrendData] = useState([]);
   const [classDistData, setClassDistData] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -37,7 +50,7 @@ export default function Dashboard() {
     const fetchDashboardData = async () => {
       setLoading(true);
 
-      // 1. Ambil Statistik Dasar (Jumlah Baris)
+      // 1. Ambil Statistik Baris Data
       const { count: classCount } = await supabase
         .from("classes")
         .select("*", { count: "exact", head: true });
@@ -48,8 +61,7 @@ export default function Dashboard() {
 
       const { count: sessionCount } = await supabase
         .from("sessions")
-        .select("*", { count: "exact", head: true })
-        .eq("is_active", true);
+        .select("*", { count: "exact", head: true });
 
       const { count: logCount } = await supabase
         .from("attendance_logs")
@@ -62,7 +74,57 @@ export default function Dashboard() {
         totalLogs: logCount || 0,
       });
 
-      // 2. Ambil Data Tren Kehadiran (7 Sesi Terakhir)
+      // 2. Hitung Penggunaan Berkas Storage (Bucket: images)
+      try {
+        const folders = ["", "receipts", "coaches", "gallery"];
+        let totalBytes = 0;
+        let totalFiles = 0;
+
+        await Promise.all(
+          folders.map(async (folder) => {
+            const { data, error } = await supabase.storage
+              .from("images")
+              .list(folder, { limit: 1000 });
+            if (!error && data) {
+              data.forEach((item) => {
+                if (item.metadata?.size) {
+                  totalBytes += item.metadata.size;
+                  totalFiles += 1;
+                }
+              });
+            }
+          })
+        );
+
+        const usedMb = Number((totalBytes / (1024 * 1024)).toFixed(2));
+        const maxMb = 1024;
+        const percent = Math.min(Number(((usedMb / maxMb) * 100).toFixed(1)), 100);
+
+        setStorageUsage({
+          usedMb,
+          maxMb,
+          percent,
+          fileCount: totalFiles,
+        });
+      } catch (_) {}
+
+      // 3. Ambil Ukuran Database PostgreSQL melalui RPC
+      try {
+        const { data: dbBytes, error: dbError } = await supabase.rpc("get_db_size_bytes");
+        if (!dbError && dbBytes) {
+          const usedDbMb = Number((Number(dbBytes) / (1024 * 1024)).toFixed(2));
+          const maxDbMb = 500;
+          const percentDb = Math.min(Number(((usedDbMb / maxDbMb) * 100).toFixed(1)), 100);
+
+          setDbUsage({
+            usedMb: usedDbMb,
+            maxMb: maxDbMb,
+            percent: percentDb,
+          });
+        }
+      } catch (_) {}
+
+      // 4. Ambil Tren Kehadiran
       const { data: logs } = await supabase
         .from("attendance_logs")
         .select(`id, sessions(session_date)`);
@@ -76,7 +138,6 @@ export default function Dashboard() {
           }
         });
 
-        // Urutkan tanggal dan ambil 7 catatan terakhir
         const formattedTrend = Object.keys(trendMap)
           .sort((a, b) => new Date(a).getTime() - new Date(b).getTime())
           .slice(-7)
@@ -91,7 +152,7 @@ export default function Dashboard() {
         setTrendData(formattedTrend);
       }
 
-      // 3. Ambil Data Distribusi Atlet per Kelas Aktif
+      // 5. Ambil Distribusi Atlet per Kelas
       const { data: enrollmentsData } = await supabase
         .from("student_enrollments")
         .select(`classes(name)`)
@@ -160,41 +221,117 @@ export default function Dashboard() {
         </p>
       </div>
 
-      {/* Kartu Metrik Utama */}
-      <div className="max-w-7xl mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      {/* Baris 1: Statistik Operasional */}
+      <div className="max-w-7xl mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-5">
         <StatCard
           title="Total Atlet"
           value={stats.students}
-          icon={<Users size={24} />}
+          icon={<Users size={22} />}
           colorClass="text-blue-600"
           bgClass="bg-blue-50"
         />
         <StatCard
           title="Total Kelas"
           value={stats.classes}
-          icon={<Layers size={24} />}
+          icon={<Layers size={22} />}
           colorClass="text-indigo-600"
           bgClass="bg-indigo-50"
         />
         <StatCard
-          title="Sesi Aktif"
+          title="Sesi Latihan"
           value={stats.activeSessions}
-          icon={<CalendarDays size={24} />}
+          icon={<CalendarDays size={22} />}
           colorClass="text-emerald-600"
           bgClass="bg-emerald-50"
         />
         <StatCard
-          title="Total Pemindaian"
+          title="Total Pindai"
           value={stats.totalLogs}
-          icon={<Activity size={24} />}
+          icon={<Activity size={22} />}
           colorClass="text-amber-600"
           bgClass="bg-amber-50"
         />
       </div>
 
+      {/* Baris 2: Pemantauan Storage & Database */}
+      <div className="max-w-7xl mx-auto grid grid-cols-1 sm:grid-cols-2 gap-5 mb-8">
+        {/* Kartu Storage Berkas */}
+        <div className="bg-white p-6 rounded-3xl shadow-xl shadow-blue-900/5 border border-slate-100 flex flex-col justify-between hover:-translate-y-1 transition-transform duration-300">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-slate-400 text-[10px] font-black uppercase tracking-widest">
+              Storage File (Supabase Bucket)
+            </span>
+            <div className="w-9 h-9 rounded-xl bg-cyan-50 text-cyan-600 flex items-center justify-center shrink-0">
+              <HardDrive size={18} />
+            </div>
+          </div>
+          <div>
+            <div className="flex items-baseline justify-between mb-1">
+              <h3 className="text-2xl font-black text-slate-800">
+                {storageUsage.usedMb} <span className="text-xs text-slate-400 font-bold">MB</span>
+              </h3>
+              <span className="text-xs font-bold text-slate-400">
+                / {storageUsage.maxMb} MB (1 GB)
+              </span>
+            </div>
+            <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden mb-1.5">
+              <div
+                className={`h-full rounded-full transition-all duration-500 ${
+                  storageUsage.percent > 85
+                    ? "bg-rose-500"
+                    : storageUsage.percent > 60
+                    ? "bg-amber-500"
+                    : "bg-cyan-500"
+                }`}
+                style={{ width: `${Math.max(storageUsage.percent, 2)}%` }}
+              />
+            </div>
+            <p className="text-[11px] text-slate-400 font-semibold">
+              {storageUsage.percent}% terpakai ({storageUsage.fileCount} total file gambar/bukti)
+            </p>
+          </div>
+        </div>
+
+        {/* Kartu Kapasitas Database */}
+        <div className="bg-white p-6 rounded-3xl shadow-xl shadow-blue-900/5 border border-slate-100 flex flex-col justify-between hover:-translate-y-1 transition-transform duration-300">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-slate-400 text-[10px] font-black uppercase tracking-widest">
+              Penyimpanan Database (PostgreSQL)
+            </span>
+            <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+              <Database size={18} />
+            </div>
+          </div>
+          <div>
+            <div className="flex items-baseline justify-between mb-1">
+              <h3 className="text-2xl font-black text-slate-800">
+                {dbUsage.usedMb} <span className="text-xs text-slate-400 font-bold">MB</span>
+              </h3>
+              <span className="text-xs font-bold text-slate-400">
+                / {dbUsage.maxMb} MB
+              </span>
+            </div>
+            <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden mb-1.5">
+              <div
+                className={`h-full rounded-full transition-all duration-500 ${
+                  dbUsage.percent > 85
+                    ? "bg-rose-500"
+                    : dbUsage.percent > 60
+                    ? "bg-amber-500"
+                    : "bg-indigo-600"
+                }`}
+                style={{ width: `${Math.max(dbUsage.percent, 2)}%` }}
+              />
+            </div>
+            <p className="text-[11px] text-slate-400 font-semibold">
+              {dbUsage.percent}% terpakai dari kuota free tier Supabase
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* Bagian Grafik Analitik */}
       <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-6 pb-10">
-        {/* Grafik 1: Tren Kehadiran */}
         <div className="bg-white p-6 md:p-8 rounded-3xl shadow-xl shadow-blue-900/5 border border-slate-100 flex flex-col h-[400px]">
           <div className="flex items-center justify-between mb-6">
             <div>
@@ -276,7 +413,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Grafik 2: Distribusi Atlet per Kelas */}
         <div className="bg-white p-6 md:p-8 rounded-3xl shadow-xl shadow-blue-900/5 border border-slate-100 flex flex-col h-[400px]">
           <div className="flex items-center justify-between mb-6">
             <div>

@@ -21,20 +21,30 @@ export default function Register() {
   const [success, setSuccess] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [registeredNis, setRegisteredNis] = useState("");
   const [form, setForm] = useState({
     full_name: "",
     email: "",
     password: "",
     confirm_password: "",
-    nis: "",
+    nis: "Memuat...",
     parent_name: "",
     age: "",
     phone_number: "",
     address: "",
   });
 
-  const findAvailableNis = async () => {
+  // Fungsi alokasi NIS otomatis dan aman (P3)
+  const fetchAvailableNis = async () => {
     try {
+      // 1. Coba panggil RPC PostgreSQL jika function sequence sudah dibuat di Supabase
+      const { data: rpcNis, error: rpcError } = await supabase.rpc("get_next_student_nis");
+      if (!rpcError && rpcNis) {
+        setForm((prev) => ({ ...prev, nis: String(rpcNis) }));
+        return String(rpcNis);
+      }
+
+      // 2. Mekanisme fallback client-side
       const { data, error } = await supabase.from("students").select("nis");
       if (error) throw error;
 
@@ -49,14 +59,17 @@ export default function Register() {
         candidate++;
       }
 
-      setForm((prev) => ({ ...prev, nis: String(candidate) }));
+      const allocatedNis = String(candidate);
+      setForm((prev) => ({ ...prev, nis: allocatedNis }));
+      return allocatedNis;
     } catch {
       setForm((prev) => ({ ...prev, nis: "1" }));
+      return "1";
     }
   };
 
   useEffect(() => {
-    findAvailableNis();
+    fetchAvailableNis();
   }, []);
 
   const handleChange = (e) => {
@@ -65,6 +78,7 @@ export default function Register() {
 
   const handleRegister = async (e) => {
     e.preventDefault();
+
     if (form.password !== form.confirm_password) {
       toast.error("Kata sandi dan konfirmasi kata sandi tidak cocok.");
       return;
@@ -79,10 +93,13 @@ export default function Register() {
     let createdUserId = null;
 
     try {
+      const cleanEmail = form.email.trim().toLowerCase();
+
+      // 1. Validasi status email yang sudah terdaftar
       const { data: existingUser } = await supabase
         .from("users")
         .select("id, status")
-        .eq("email", form.email.trim())
+        .eq("email", cleanEmail)
         .maybeSingle();
 
       if (existingUser) {
@@ -90,30 +107,49 @@ export default function Register() {
           throw new Error("Email ini sudah terdaftar dan sedang menunggu persetujuan admin.");
         }
         if (existingUser.status === "active") {
-          throw new Error("Email ini sudah terdaftar dan aktif. Silakan masuk.");
+          throw new Error("Email ini sudah terdaftar dan aktif. Silakan menuju halaman masuk.");
         }
         if (existingUser.status === "rejected") {
-          await supabase.from("students").delete().eq("user_id", existingUser.id);
+          // Bersihkan relasi data lama jika pendaftaran sebelumnya ditolak
+          const { data: oldStudent } = await supabase
+            .from("students")
+            .select("id")
+            .eq("user_id", existingUser.id)
+            .maybeSingle();
+
+          if (oldStudent) {
+            await supabase.from("student_enrollments").delete().eq("student_id", oldStudent.id);
+            await supabase.from("payments").delete().eq("student_id", oldStudent.id);
+            await supabase.from("attendance_logs").delete().eq("student_id", oldStudent.id);
+            await supabase.from("students").delete().eq("id", oldStudent.id);
+          }
           await supabase.from("users").delete().eq("id", existingUser.id);
         }
       }
 
-      const { data: existingNis } = await supabase
-        .from("students")
-        .select("id")
-        .eq("nis", form.nis.trim())
-        .maybeSingle();
-
-      if (existingNis) {
-        await findAvailableNis();
-        throw new Error("Nomor urut NIS baru saja terpakai. Nomor telah diperbarui otomatis, silakan klik daftar lagi.");
+      // 2. Alokasikan dan verifikasi NIS tepat sebelum proses insert dilakukan
+      let targetNis = form.nis;
+      if (!targetNis || targetNis === "Memuat...") {
+        targetNis = await fetchAvailableNis();
       }
 
+      const { data: duplicateNis } = await supabase
+        .from("students")
+        .select("id")
+        .eq("nis", targetNis.trim())
+        .maybeSingle();
+
+      if (duplicateNis) {
+        const freshNis = await fetchAvailableNis();
+        throw new Error(`Nomor urut NIS telah terpakai. Sistem telah memperbarui ke nomor urut ${freshNis}. Silakan klik Daftar lagi.`);
+      }
+
+      // 3. Simpan akun ke tabel users
       const { data: newUser, error: userError } = await supabase
         .from("users")
         .insert([
           {
-            email: form.email.trim(),
+            email: cleanEmail,
             password: form.password.trim(),
             full_name: form.full_name.trim(),
             role: "student",
@@ -126,28 +162,31 @@ export default function Register() {
       if (userError) throw userError;
       createdUserId = newUser.id;
 
+      // 4. Simpan data detail atlet ke tabel students
       const { error: studentError } = await supabase.from("students").insert([
         {
           user_id: newUser.id,
-          nis: form.nis.trim(),
+          nis: targetNis.trim(),
           parent_name: form.parent_name.trim(),
           phone_number: form.phone_number.trim(),
           address: form.address.trim(),
           age: form.age ? parseInt(form.age, 10) : null,
-          qr_token: uuidv4(),
+          qr_token: `token_student_${uuidv4()}`,
         },
       ]);
 
       if (studentError) throw studentError;
 
+      setRegisteredNis(targetNis.trim());
       toast.success("Pendaftaran berhasil dicatat!", { id: loadingToast });
       setSuccess(true);
     } catch (error) {
+      // Rollback manual jika pembuatan profile gagal di tengah jalan
       if (createdUserId) {
         await supabase.from("students").delete().eq("user_id", createdUserId);
         await supabase.from("users").delete().eq("id", createdUserId);
       }
-      toast.error(error.message || "Terjadi kesalahan pendaftaran.", { id: loadingToast });
+      toast.error(error.message || "Terjadi kesalahan saat pendaftaran.", { id: loadingToast });
     } finally {
       setLoading(false);
     }
@@ -156,20 +195,20 @@ export default function Register() {
   if (success) {
     return (
       <div className="min-h-screen bg-[#0a192f] flex items-center justify-center p-4 font-sans">
-        <div className="w-full max-w-md bg-white rounded-[2rem] p-8 md:p-10 shadow-2xl flex flex-col items-center text-center">
+        <div className="w-full max-w-md bg-white rounded-[2rem] p-8 md:p-10 shadow-2xl flex flex-col items-center text-center animate-in zoom-in-95 duration-200">
           <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mb-6 ring-8 ring-emerald-50/50">
             <CheckCircle2 size={36} />
           </div>
           <h2 className="text-2xl font-black text-slate-800 mb-2">Pendaftaran Berhasil</h2>
           <p className="text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1.5 rounded-full mb-3">
-            Nomor Induk Atlet: {form.nis}
+            Nomor Induk Siswa (NIS): {registeredNis}
           </p>
           <p className="text-slate-500 font-medium mb-8 text-sm leading-relaxed">
-            Data Anda telah tercatat dan sedang menunggu verifikasi oleh administrator.
+            Data pendaftaran Anda telah tercatat dan sedang menunggu verifikasi oleh pengelola klub.
           </p>
           <Link
             to="/login"
-            className="w-full py-3.5 px-4 bg-slate-900 hover:bg-black text-white font-bold rounded-xl shadow-lg transition-all text-sm"
+            className="w-full py-3.5 px-4 bg-slate-900 hover:bg-black text-white font-bold rounded-xl shadow-lg transition-all text-sm block"
           >
             Menuju Halaman Masuk
           </Link>
@@ -191,7 +230,7 @@ export default function Register() {
               Bergabung dengan Siripbiru
             </h1>
             <p className="text-blue-100 text-sm leading-relaxed">
-              Lengkapi formulir pendaftaran atlet untuk mendapatkan kartu digital dan jadwal latihan resmi.
+              Lengkapi formulir pendaftaran atlet untuk mendapatkan kartu digital dan jadwal latihan resmi klub.
             </p>
           </div>
           <div>
@@ -308,7 +347,7 @@ export default function Register() {
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">
-                      NIS
+                      NIS (Otomatis)
                     </label>
                     <div className="relative">
                       <Hash size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-blue-500" />
@@ -317,14 +356,14 @@ export default function Register() {
                         name="nis"
                         value={form.nis}
                         className="w-full pl-8 pr-3 py-2.5 bg-blue-50/60 border border-blue-200 text-blue-800 font-bold font-mono rounded-xl text-xs sm:text-sm outline-none cursor-not-allowed"
-                        title="Nomor Induk Siswa dialokasikan otomatis dari nomor urut yang tersedia"
+                        title="Nomor Induk Siswa dialokasikan otomatis dari nomor urut berikutnya"
                       />
                     </div>
                   </div>
 
                   <div>
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">
-                      Usia (Th)
+                      Usia (Tahun)
                     </label>
                     <input
                       required
@@ -395,7 +434,7 @@ export default function Register() {
 
             <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3">
               <p className="text-[11px] text-slate-400 text-center sm:text-left">
-                Akun akan diverifikasi secara manual oleh pihak pengelola.
+                Akun akan diverifikasi secara manual oleh administrator klub.
               </p>
               <button
                 type="submit"

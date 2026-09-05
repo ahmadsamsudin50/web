@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { supabase } from "../../utils/supabaseClient";
 import { toast, Toaster } from "react-hot-toast";
 import {
@@ -12,6 +12,8 @@ import {
   AlertTriangle,
   CheckSquare,
   Square,
+  Layers,
+  Sparkles,
 } from "lucide-react";
 
 function CustomConfirmModal({
@@ -98,6 +100,45 @@ export default function Payments() {
     setConfirmState((prev) => ({ ...prev, isOpen: false, onConfirm: null }));
   };
 
+  // Helper untuk membersihkan berkas bukti transfer di Supabase Storage (P4)
+  const extractStoragePath = (publicUrl) => {
+    if (!publicUrl) return null;
+    try {
+      const parts = publicUrl.split("/images/");
+      if (parts.length > 1) {
+        return parts[1];
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
+  const deleteReceiptFileIfOrphan = async (receiptUrl, excludePaymentIds = []) => {
+    if (!receiptUrl) return;
+    const filePath = extractStoragePath(receiptUrl);
+    if (!filePath) return;
+
+    try {
+      let query = supabase
+        .from("payments")
+        .select("id", { count: "exact", head: true })
+        .eq("receipt_url", receiptUrl);
+
+      if (excludePaymentIds.length > 0) {
+        query = query.not("id", "in", `(${excludePaymentIds.join(",")})`);
+      }
+
+      const { count } = await query;
+      // Hapus berkas fisik jika tidak dipakai baris transaksi lain
+      if (!count || count === 0) {
+        await supabase.storage.from("images").remove([filePath]);
+      }
+    } catch (err) {
+      console.error("Gagal membersihkan berkas bukti:", err);
+    }
+  };
+
   const fetchPayments = async () => {
     setLoading(true);
     try {
@@ -105,8 +146,8 @@ export default function Payments() {
         .from("payments")
         .select(`
           *,
-          students ( nis, users ( full_name ) ),
-          classes ( name, max_capacity )
+          students ( id, nis, users ( full_name ) ),
+          classes ( id, name, max_capacity )
         `)
         .order("created_at", { ascending: false });
       if (error) throw error;
@@ -122,14 +163,29 @@ export default function Payments() {
     fetchPayments();
   }, []);
 
-  const filteredPayments = payments.filter((p) => {
-    const studentName = p.students?.users?.full_name?.toLowerCase() || "";
-    const className = p.classes?.name?.toLowerCase() || "";
-    const query = searchQuery.toLowerCase();
-    const matchesSearch = studentName.includes(query) || className.includes(query);
-    const matchesStatus = filterStatus === "all" ? true : p.status === filterStatus;
-    return matchesSearch && matchesStatus;
-  });
+  const filteredPayments = useMemo(() => {
+    return payments.filter((p) => {
+      const studentName = p.students?.users?.full_name?.toLowerCase() || "";
+      const className = p.classes?.name?.toLowerCase() || "";
+      const query = searchQuery.toLowerCase();
+      const matchesSearch = studentName.includes(query) || className.includes(query);
+      const matchesStatus = filterStatus === "all" ? true : p.status === filterStatus;
+      return matchesSearch && matchesStatus;
+    });
+  }, [payments, searchQuery, filterStatus]);
+
+  const relatedPayments = useMemo(() => {
+    if (!selectedPayment || !selectedPayment.receipt_url) return [];
+    return payments.filter(
+      (p) =>
+        p.student_id === selectedPayment.student_id &&
+        p.receipt_url === selectedPayment.receipt_url
+    );
+  }, [payments, selectedPayment]);
+
+  const relatedTotalAmount = useMemo(() => {
+    return relatedPayments.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+  }, [relatedPayments]);
 
   const counts = {
     pending: payments.filter((p) => p.status === "pending").length,
@@ -167,49 +223,73 @@ export default function Payments() {
     setIsModalOpen(true);
   };
 
-  const handleApprove = async () => {
+  // Helper eksekusi persetujuan atomik (P2 & P3)
+  const processApproval = async (paymentItem, adminId) => {
+    // 1. Coba panggil RPC PostgreSQL atomik jika fungsi SQL telah dibuat
+    const { error: rpcError } = await supabase.rpc("approve_student_payment", {
+      p_payment_id: paymentItem.id,
+      p_admin_id: adminId || null,
+    });
+
+    if (!rpcError) return;
+
+    // 2. Mekanisme Fallback sisi klien jika RPC belum dibuat
+    const { data: existingActive } = await supabase
+      .from("student_enrollments")
+      .select("id")
+      .eq("student_id", paymentItem.student_id)
+      .eq("class_id", paymentItem.class_id)
+      .eq("status", "active")
+      .maybeSingle();
+
+    if (existingActive) {
+      throw new Error(`Atlet sudah aktif di kelas ${paymentItem.classes?.name}.`);
+    }
+
+    const { count: enrolledCount, error: countError } = await supabase
+      .from("student_enrollments")
+      .select("*", { count: "exact", head: true })
+      .eq("class_id", paymentItem.class_id)
+      .eq("status", "active");
+
+    if (countError) throw countError;
+
+    const maxCapacity = paymentItem.classes?.max_capacity || 20;
+    if (enrolledCount >= maxCapacity) {
+      throw new Error(`Kelas ${paymentItem.classes?.name} telah penuh (${maxCapacity} atlet aktif).`);
+    }
+
+    const { error: updateError } = await supabase
+      .from("payments")
+      .update({
+        status: "approved",
+        processed_by: adminId || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", paymentItem.id);
+
+    if (updateError) throw updateError;
+
+    const { error: enrollError } = await supabase.from("student_enrollments").insert([
+      {
+        student_id: paymentItem.student_id,
+        class_id: paymentItem.class_id,
+        status: "active",
+      },
+    ]);
+
+    if (enrollError) throw enrollError;
+  };
+
+  // Setujui Satu Baris Kelas
+  const handleApproveSingle = async (targetPayment) => {
     setActionLoading(true);
     const loadingToast = toast.loading("Memeriksa kapasitas kelas dan menyetujui...");
     try {
-      const { count: enrolledCount, error: countError } = await supabase
-        .from("student_enrollments")
-        .select("*", { count: "exact", head: true })
-        .eq("class_id", selectedPayment.class_id)
-        .in("status", ["active", "completed"]);
+      const admin = JSON.parse(localStorage.getItem("user_session") || "{}");
+      await processApproval(targetPayment, admin?.id);
 
-      if (countError) throw countError;
-
-      const maxCapacity = selectedPayment.classes?.max_capacity || 0;
-      if (enrolledCount >= maxCapacity) {
-        throw new Error(`Kelas telah penuh. Kuota maksimal (${maxCapacity}) siswa sudah tercapai.`);
-      }
-
-      const admin = JSON.parse(localStorage.getItem("user_session"));
-
-      const { error: updateError } = await supabase
-        .from("payments")
-        .update({
-          status: "approved",
-          processed_by: admin?.id || null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", selectedPayment.id);
-
-      if (updateError) throw updateError;
-
-      const { error: enrollError } = await supabase
-        .from("student_enrollments")
-        .insert([
-          {
-            student_id: selectedPayment.student_id,
-            class_id: selectedPayment.class_id,
-            status: "active",
-          },
-        ]);
-
-      if (enrollError) throw enrollError;
-
-      toast.success("Pembayaran disetujui dan atlet telah terdaftar di kelas!", { id: loadingToast });
+      toast.success(`Pembayaran kelas ${targetPayment.classes?.name} disetujui!`, { id: loadingToast });
       setIsModalOpen(false);
       fetchPayments();
     } catch (error) {
@@ -219,6 +299,29 @@ export default function Payments() {
     }
   };
 
+  // Setujui Semua Kelas Sekaligus Dalam 1 Bukti Transfer
+  const handleApproveAllRelated = async () => {
+    setActionLoading(true);
+    const pendingRelated = relatedPayments.filter((p) => p.status === "pending");
+    const loadingToast = toast.loading(`Menyetujui ${pendingRelated.length} kelas sekaligus...`);
+
+    try {
+      const admin = JSON.parse(localStorage.getItem("user_session") || "{}");
+      for (const p of pendingRelated) {
+        await processApproval(p, admin?.id);
+      }
+
+      toast.success(`Seluruh kelas (${pendingRelated.length}) berhasil diaktifkan!`, { id: loadingToast });
+      setIsModalOpen(false);
+      fetchPayments();
+    } catch (error) {
+      toast.error(error.message, { id: loadingToast });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Tolak Pembayaran & Bersihkan Berkas Terkait (P4)
   const handleReject = async () => {
     if (!rejectReason.trim()) {
       toast.error("Harap isi alasan penolakan.");
@@ -228,7 +331,7 @@ export default function Payments() {
     setActionLoading(true);
     const loadingToast = toast.loading("Menolak transaksi...");
     try {
-      const admin = JSON.parse(localStorage.getItem("user_session"));
+      const admin = JSON.parse(localStorage.getItem("user_session") || "{}");
       const { error } = await supabase
         .from("payments")
         .update({
@@ -241,6 +344,9 @@ export default function Payments() {
 
       if (error) throw error;
 
+      // P4: Hapus berkas struk jika tidak terpakai oleh transaksi lain
+      await deleteReceiptFileIfOrphan(selectedPayment.receipt_url, [selectedPayment.id]);
+
       toast.success("Pengajuan pembayaran berhasil ditolak.", { id: loadingToast });
       setIsModalOpen(false);
       fetchPayments();
@@ -251,6 +357,7 @@ export default function Payments() {
     }
   };
 
+  // Hapus Satu Transaksi & Bersihkan Berkas Struk (P4)
   const handleDeleteSingle = (payment) => {
     triggerConfirm({
       title: "Hapus Riwayat Pembayaran?",
@@ -259,12 +366,14 @@ export default function Payments() {
       isDestructive: true,
       onConfirm: async () => {
         closeConfirm();
-        const loadingToast = toast.loading("Menghapus data pembayaran...");
+        const loadingToast = toast.loading("Menghapus data dan berkas terkait...");
         try {
           const { error } = await supabase.from("payments").delete().eq("id", payment.id);
           if (error) throw error;
 
-          toast.success("Riwayat pembayaran berhasil dihapus.", { id: loadingToast });
+          await deleteReceiptFileIfOrphan(payment.receipt_url, [payment.id]);
+
+          toast.success("Riwayat pembayaran dan berkas berhasil dibersihkan.", { id: loadingToast });
           setSelectedIds((prev) => prev.filter((id) => id !== payment.id));
           fetchPayments();
         } catch (error) {
@@ -274,20 +383,28 @@ export default function Payments() {
     });
   };
 
+  // Hapus Massal Transaksi & Bersihkan Berkas (P4)
   const handleDeleteSelected = () => {
     if (selectedIds.length === 0) return;
 
     triggerConfirm({
       title: `Hapus ${selectedIds.length} Riwayat Pembayaran?`,
-      message: `Semua catatan pembayaran yang dicentang (${selectedIds.length} data) akan dihapus secara permanen.`,
+      message: `Semua catatan pembayaran yang dicentang (${selectedIds.length} data) akan dihapus secara permanen beserta berkas struk yang tidak terpakai.`,
       confirmLabel: `Hapus ${selectedIds.length} Data`,
       isDestructive: true,
       onConfirm: async () => {
         closeConfirm();
         const loadingToast = toast.loading(`Menghapus ${selectedIds.length} pembayaran...`);
         try {
+          const paymentsToDelete = payments.filter((p) => selectedIds.includes(p.id));
+          const receiptUrls = [...new Set(paymentsToDelete.map((p) => p.receipt_url).filter(Boolean))];
+
           const { error } = await supabase.from("payments").delete().in("id", selectedIds);
           if (error) throw error;
+
+          for (const url of receiptUrls) {
+            await deleteReceiptFileIfOrphan(url, selectedIds);
+          }
 
           toast.success(`${selectedIds.length} riwayat pembayaran berhasil dihapus.`, { id: loadingToast });
           setSelectedIds([]);
@@ -304,7 +421,7 @@ export default function Payments() {
       style: "currency",
       currency: "IDR",
       minimumFractionDigits: 0,
-    }).format(number);
+    }).format(Number(number) || 0);
   };
 
   const getStatusBadge = (status) => {
@@ -349,7 +466,7 @@ export default function Payments() {
           Verifikasi Pembayaran
         </h1>
         <p className="text-slate-500 mt-1 text-sm">
-          Periksa, validasi, atau kelola riwayat transaksi pendaftaran kelas atlet.
+          Periksa, validasi, dan kelola konfirmasi transfer pendaftaran kelas atlet.
         </p>
       </div>
 
@@ -475,8 +592,16 @@ export default function Payments() {
               {filteredPayments.map((p) => {
                 const isSelected = selectedIds.includes(p.id);
                 const dateObj = new Date(p.created_at);
-                const dateStr = dateObj.toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
+                const dateStr = dateObj.toLocaleDateString("id-ID", {
+                  day: "numeric",
+                  month: "short",
+                  year: "numeric",
+                });
                 const timeStr = dateObj.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
+
+                const siblingCount = payments.filter(
+                  (item) => item.student_id === p.student_id && item.receipt_url === p.receipt_url
+                ).length;
 
                 return (
                   <tr
@@ -500,7 +625,14 @@ export default function Payments() {
                     </td>
                     <td className="px-6 py-4">
                       <div className="font-bold text-slate-800 text-sm">{formatRupiah(p.amount)}</div>
-                      <div className="text-xs text-slate-400 mt-0.5">{dateStr} • {timeStr} WIB</div>
+                      <div className="text-xs text-slate-400 mt-0.5">
+                        {dateStr} • {timeStr} WIB
+                      </div>
+                      {siblingCount > 1 && (
+                        <span className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 font-bold text-[9px] border border-indigo-200">
+                          <Layers size={10} /> Paket {siblingCount} Kelas
+                        </span>
+                      )}
                     </td>
                     <td className="px-6 py-4">
                       <div className="font-bold text-slate-800 text-sm">{p.students?.users?.full_name || "Atlet"}</div>
@@ -534,27 +666,8 @@ export default function Payments() {
           </table>
         </div>
 
+        {/* Mobile View */}
         <div className="md:hidden space-y-3">
-          {filteredPayments.length > 0 && (
-            <div className="flex justify-between items-center px-1 text-xs text-slate-500">
-              <button
-                type="button"
-                onClick={toggleSelectAll}
-                className="flex items-center gap-2 font-bold text-blue-600"
-              >
-                {isAllCurrentSelected ? (
-                  <CheckSquare size={16} />
-                ) : (
-                  <Square size={16} />
-                )}
-                {isAllCurrentSelected ? "Batalkan Pilihan Semua" : "Pilih Semua Data"}
-              </button>
-              {selectedIds.length > 0 && (
-                <span className="font-bold text-slate-700">{selectedIds.length} Terpilih</span>
-              )}
-            </div>
-          )}
-
           {filteredPayments.map((p) => {
             const isSelected = selectedIds.includes(p.id);
             const dateObj = new Date(p.created_at);
@@ -625,11 +738,19 @@ export default function Payments() {
         )}
       </div>
 
+      {/* Modal Tinjau Pembayaran */}
       {isModalOpen && selectedPayment && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 flex flex-col gap-5 animate-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center border-b border-slate-100 pb-3">
-              <h3 className="text-base font-bold text-slate-800">Tinjau Pembayaran</h3>
+              <div>
+                <h3 className="text-base font-bold text-slate-800">Tinjau Bukti Pembayaran</h3>
+                {relatedPayments.length > 1 && (
+                  <p className="text-[11px] text-indigo-600 font-semibold flex items-center gap-1 mt-0.5">
+                    <Sparkles size={12} /> Murid ini membayar {relatedPayments.length} kelas sekaligus dalam 1 transfer
+                  </p>
+                )}
+              </div>
               <button
                 onClick={() => setIsModalOpen(false)}
                 className="p-1 rounded-full text-slate-400 hover:bg-slate-100 transition-colors"
@@ -648,19 +769,40 @@ export default function Payments() {
               </a>
             </div>
 
-            <div className="p-4 bg-slate-50 rounded-2xl space-y-2 text-xs">
+            <div className="p-4 bg-slate-50 rounded-2xl space-y-2.5 text-xs">
               <div className="flex justify-between">
                 <span className="text-slate-500">Nama Atlet:</span>
                 <span className="font-bold text-slate-800">{selectedPayment.students?.users?.full_name}</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Kelas:</span>
-                <span className="font-bold text-slate-800">{selectedPayment.classes?.name}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Nominal:</span>
-                <span className="font-bold text-emerald-600 text-sm">{formatRupiah(selectedPayment.amount)}</span>
-              </div>
+
+              {relatedPayments.length > 1 ? (
+                <div className="pt-2 border-t border-slate-200 space-y-1.5">
+                  <span className="font-bold text-slate-600 block mb-1">Rincian Paket Kelas Terkait:</span>
+                  {relatedPayments.map((rp) => (
+                    <div key={rp.id} className="flex justify-between items-center pl-2 text-[11px]">
+                      <span className="text-slate-600 flex items-center gap-1.5">
+                        • {rp.classes?.name} {rp.id === selectedPayment.id && <b className="text-blue-600">(sedang ditinjau)</b>}
+                      </span>
+                      <span className="font-semibold text-slate-800">{formatRupiah(rp.amount)}</span>
+                    </div>
+                  ))}
+                  <div className="flex justify-between items-center pt-2 border-t border-slate-200 font-bold text-xs">
+                    <span className="text-blue-700">Total Nominal di Struk Transfer:</span>
+                    <span className="text-emerald-700 font-mono text-sm">{formatRupiah(relatedTotalAmount)}</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Kelas:</span>
+                    <span className="font-bold text-slate-800">{selectedPayment.classes?.name}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Nominal Transfer:</span>
+                    <span className="font-bold text-emerald-600 text-sm">{formatRupiah(selectedPayment.amount)}</span>
+                  </div>
+                </div>
+              )}
             </div>
 
             {isRejecting && selectedPayment.status === "pending" && (
@@ -677,26 +819,38 @@ export default function Payments() {
             )}
 
             {selectedPayment.status === "pending" && (
-              <div className="flex flex-col sm:flex-row gap-2 pt-2 border-t border-slate-100">
+              <div className="space-y-2 pt-2 border-t border-slate-100">
                 {!isRejecting ? (
                   <>
-                    <button
-                      onClick={handleApprove}
-                      disabled={actionLoading}
-                      className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-md transition-all active:scale-95"
-                    >
-                      <CheckCircle2 size={16} /> Setujui Pembayaran
-                    </button>
-                    <button
-                      onClick={() => setIsRejecting(true)}
-                      disabled={actionLoading}
-                      className="flex-1 py-3 bg-rose-50 text-rose-600 hover:bg-rose-100 font-bold rounded-xl text-xs flex items-center justify-center gap-2 transition-all active:scale-95"
-                    >
-                      <XCircle size={16} /> Tolak Pembayaran
-                    </button>
+                    {relatedPayments.length > 1 && relatedPayments.some((p) => p.status === "pending") && (
+                      <button
+                        onClick={handleApproveAllRelated}
+                        disabled={actionLoading}
+                        className="w-full py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-md transition-all active:scale-95"
+                      >
+                        <Sparkles size={16} /> Setujui Semua ({relatedPayments.filter((p) => p.status === "pending").length} Kelas Sekaligus)
+                      </button>
+                    )}
+
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <button
+                        onClick={() => handleApproveSingle(selectedPayment)}
+                        disabled={actionLoading}
+                        className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-md transition-all active:scale-95"
+                      >
+                        <CheckCircle2 size={16} /> Setujui Hanya Kelas Ini
+                      </button>
+                      <button
+                        onClick={() => setIsRejecting(true)}
+                        disabled={actionLoading}
+                        className="flex-1 py-3 bg-rose-50 text-rose-600 hover:bg-rose-100 font-bold rounded-xl text-xs flex items-center justify-center gap-2 transition-all active:scale-95"
+                      >
+                        <XCircle size={16} /> Tolak Pembayaran
+                      </button>
+                    </div>
                   </>
                 ) : (
-                  <>
+                  <div className="flex gap-2">
                     <button
                       onClick={() => setIsRejecting(false)}
                       className="flex-1 py-2.5 bg-slate-100 text-slate-600 font-bold rounded-xl text-xs"
@@ -710,7 +864,7 @@ export default function Payments() {
                     >
                       Konfirmasi Tolak
                     </button>
-                  </>
+                  </div>
                 )}
               </div>
             )}

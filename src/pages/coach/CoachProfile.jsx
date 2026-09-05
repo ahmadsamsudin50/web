@@ -95,13 +95,47 @@ export default function CoachProfile() {
   const [photoUploadMethod, setPhotoUploadMethod] = useState("file");
   const [photoFile, setPhotoFile] = useState(null);
   const [previewPhotoUrl, setPreviewPhotoUrl] = useState("");
-  const [currentPasswordInDb, setCurrentPasswordInDb] = useState("");
+  const [initialPhotoUrl, setInitialPhotoUrl] = useState("");
 
   const [editForm, setEditForm] = useState({
     full_name: '', email: '', password: '', specialty: '', phone_number: '',
     nickname: '', role_title: '', experience_desc: '', age: '', nationality: 'Indonesia',
     photo_url: '', achievements: ['']
   });
+
+  // Helper pembersihan berkas foto lama di Supabase Storage (P4)
+  const extractStoragePath = (publicUrl) => {
+    if (!publicUrl) return null;
+    try {
+      const parts = publicUrl.split("/images/");
+      if (parts.length > 1) {
+        return parts[1];
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
+  const deleteCoachPhotoIfOrphan = async (photoUrl, currentCoachId) => {
+    if (!photoUrl) return;
+    const filePath = extractStoragePath(photoUrl);
+    if (!filePath || !filePath.startsWith("coaches/")) return;
+
+    try {
+      const { count } = await supabase
+        .from("coaches")
+        .select("id", { count: "exact", head: true })
+        .eq("photo_url", photoUrl)
+        .neq("id", currentCoachId);
+
+      if (!count || count === 0) {
+        await supabase.storage.from("images").remove([filePath]);
+      }
+    } catch (err) {
+      console.error("Gagal membersihkan foto profil lama:", err);
+    }
+  };
 
   const fetchProfile = useCallback(async () => {
     try {
@@ -113,7 +147,7 @@ export default function CoachProfile() {
         .select(`
           id, qr_token, specialty, phone_number,
           nickname, role_title, experience_desc, age, nationality, photo_url, achievements,
-          users ( id, full_name, email, password )
+          users ( id, full_name, email )
         `)
         .eq("user_id", user.id)
         .single();
@@ -163,11 +197,11 @@ export default function CoachProfile() {
   };
 
   const openEditModal = () => {
-    const existingPassword = coachData.users?.password || '';
+    const currentPhoto = coachData.photo_url || '';
     setEditForm({
       full_name: coachData.users?.full_name || '',
       email: coachData.users?.email || '',
-      password: existingPassword,
+      password: '',
       specialty: coachData.specialty || '',
       phone_number: coachData.phone_number || '',
       nickname: coachData.nickname || '',
@@ -175,14 +209,14 @@ export default function CoachProfile() {
       experience_desc: coachData.experience_desc || '',
       age: coachData.age ?? '',
       nationality: coachData.nationality || 'Indonesia',
-      photo_url: coachData.photo_url || '',
+      photo_url: currentPhoto,
       achievements: coachData.achievements?.length > 0 ? coachData.achievements : ['']
     });
-    setCurrentPasswordInDb(existingPassword);
+    setInitialPhotoUrl(currentPhoto);
     setShowPassword(false);
-    setPhotoUploadMethod(coachData.photo_url ? "url" : "file");
+    setPhotoUploadMethod(currentPhoto ? "url" : "file");
     setPhotoFile(null);
-    setPreviewPhotoUrl(coachData.photo_url || "");
+    setPreviewPhotoUrl(currentPhoto);
     setIsEditModalOpen(true);
   };
 
@@ -220,15 +254,16 @@ export default function CoachProfile() {
     const loadingToast = toast.loading("Menyimpan perubahan profil...");
     const cleanAchievements = editForm.achievements.filter(a => a.trim() !== "");
     let finalPhotoUrl = editForm.photo_url;
+    let newlyUploadedPath = null;
 
     if (photoUploadMethod === "file" && photoFile) {
       try {
         const fileExt = photoFile.name.split('.').pop();
         const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
-        const filePath = `coaches/${fileName}`;
-        const { error: uploadError } = await supabase.storage.from('images').upload(filePath, photoFile);
+        newlyUploadedPath = `coaches/${fileName}`;
+        const { error: uploadError } = await supabase.storage.from('images').upload(newlyUploadedPath, photoFile);
         if (uploadError) throw uploadError;
-        const { data: urlData } = supabase.storage.from('images').getPublicUrl(filePath);
+        const { data: urlData } = supabase.storage.from('images').getPublicUrl(newlyUploadedPath);
         finalPhotoUrl = urlData.publicUrl;
       } catch (err) {
         toast.error("Gagal mengunggah foto profil: " + err.message, { id: loadingToast });
@@ -238,14 +273,33 @@ export default function CoachProfile() {
     }
 
     try {
-      const user = JSON.parse(localStorage.getItem("user_session"));
-      const trimmedPassword = editForm.password.trim();
-      if (trimmedPassword.length < 6) {
-        throw new Error("Kata sandi minimal 6 karakter.");
+      const user = JSON.parse(localStorage.getItem("user_session") || "{}");
+      const cleanEmail = editForm.email.trim().toLowerCase();
+
+      // P3: Validasi apakah email diubah dan sudah terpakai oleh user lain
+      if (cleanEmail !== user.email?.toLowerCase()) {
+        const { data: existingUser } = await supabase
+          .from("users")
+          .select("id")
+          .eq("email", cleanEmail)
+          .neq("id", user.id)
+          .maybeSingle();
+
+        if (existingUser) {
+          throw new Error("Alamat email baru sudah digunakan oleh akun lain.");
+        }
       }
 
-      const userUpdateData = { full_name: editForm.full_name.trim(), email: editForm.email.trim() };
-      if (trimmedPassword !== currentPasswordInDb) {
+      const trimmedPassword = editForm.password.trim();
+      const userUpdateData = { 
+        full_name: editForm.full_name.trim(), 
+        email: cleanEmail 
+      };
+
+      if (trimmedPassword) {
+        if (trimmedPassword.length < 6) {
+          throw new Error("Kata sandi baru minimal harus 6 karakter.");
+        }
         userUpdateData.password = trimmedPassword;
       }
 
@@ -266,14 +320,23 @@ export default function CoachProfile() {
 
       if (coachError) throw coachError;
 
+      // P4: Hapus foto lama di storage jika berkas baru berhasil diperbarui
+      if (initialPhotoUrl && finalPhotoUrl !== initialPhotoUrl) {
+        await deleteCoachPhotoIfOrphan(initialPhotoUrl, coachData.id);
+      }
+
       toast.success("Profil berhasil diperbarui!", { id: loadingToast });
       setIsEditModalOpen(false);
       fetchProfile();
 
       user.full_name = editForm.full_name.trim();
-      user.email = editForm.email.trim();
+      user.email = cleanEmail;
       localStorage.setItem("user_session", JSON.stringify(user));
     } catch (error) {
+      // Rollback jika foto sempat terunggah tetapi update database gagal
+      if (newlyUploadedPath) {
+        await supabase.storage.from('images').remove([newlyUploadedPath]);
+      }
       toast.error(`Pembaruan gagal: ${error.message}`, { id: loadingToast });
     } finally {
       setIsSubmitting(false);
@@ -306,23 +369,23 @@ export default function CoachProfile() {
           <div className="bg-[#0a192f] p-6 text-center text-white relative">
             <ShieldCheck size={100} className="absolute -right-4 -top-4 text-white/5 rotate-12" />
             <div className="relative z-10 flex flex-col items-center">
-              {coachData.photo_url ? (
+              {coachData?.photo_url ? (
                 <img src={coachData.photo_url} alt="Profil" className="w-16 h-16 rounded-2xl object-cover mb-3 border border-white/10 shadow-md" />
               ) : (
                 <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center text-white font-black text-xl mb-3">SB</div>
               )}
               <h2 className="text-[10px] tracking-widest uppercase text-blue-200 font-bold mb-1">Siripbiru Swim Club</h2>
-              <h3 className="text-lg font-bold text-white">{coachData.users?.full_name || "Instruktur"}</h3>
-              <div className="text-cyan-300 text-[11px] mt-0.5">{coachData.users?.email}</div>
+              <h3 className="text-lg font-bold text-white">{coachData?.users?.full_name || "Instruktur"}</h3>
+              <div className="text-cyan-300 text-[11px] mt-0.5">{coachData?.users?.email}</div>
               <span className="mt-2 px-3 py-0.5 bg-emerald-500/20 text-emerald-300 rounded-full text-[10px] font-bold uppercase tracking-wider border border-emerald-500/30">
-                {coachData.role_title || "PELATIH"}
+                {coachData?.role_title || "PELATIH"}
               </span>
             </div>
           </div>
 
           <div className="p-6 flex flex-col items-center bg-white">
             <div ref={qrRef} className="p-3 bg-white rounded-2xl border border-slate-100 shadow-sm">
-              {coachData.qr_token ? (
+              {coachData?.qr_token ? (
                 <QRCodeSVG value={coachData.qr_token} size={160} level="H" fgColor="#0a192f" />
               ) : (
                 <div className="w-40 h-40 flex items-center justify-center text-slate-400 text-xs">QR Tidak Tersedia</div>
@@ -334,15 +397,15 @@ export default function CoachProfile() {
           <div className="bg-slate-50 p-5 border-t border-slate-100 space-y-2.5 text-xs">
             <div className="flex items-center gap-2.5">
               <Medal size={14} className="text-amber-500 shrink-0" />
-              <div className="truncate"><span className="text-slate-400">Spesialisasi: </span><span className="font-semibold text-slate-700">{coachData.specialty || "-"}</span></div>
+              <div className="truncate"><span className="text-slate-400">Spesialisasi: </span><span className="font-semibold text-slate-700">{coachData?.specialty || "-"}</span></div>
             </div>
             <div className="flex items-center gap-2.5">
               <Phone size={14} className="text-blue-500 shrink-0" />
-              <div className="truncate"><span className="text-slate-400">Kontak: </span><span className="font-semibold text-slate-700">{coachData.phone_number || "-"}</span></div>
+              <div className="truncate"><span className="text-slate-400">Kontak: </span><span className="font-semibold text-slate-700">{coachData?.phone_number || "-"}</span></div>
             </div>
             <div className="flex items-center gap-2.5">
               <Calendar size={14} className="text-indigo-500 shrink-0" />
-              <div className="truncate"><span className="text-slate-400">Usia: </span><span className="font-semibold text-slate-700">{coachData.age ? `${coachData.age} Tahun` : "-"}</span></div>
+              <div className="truncate"><span className="text-slate-400">Usia: </span><span className="font-semibold text-slate-700">{coachData?.age ? `${coachData.age} Tahun` : "-"}</span></div>
             </div>
           </div>
         </div>
@@ -383,9 +446,20 @@ export default function CoachProfile() {
                     <input required type="email" value={editForm.email} onChange={e => setEditForm({...editForm, email: e.target.value})} className={inputCls} placeholder="email@pelatih.com" />
                   </div>
                   <div className="sm:col-span-2">
-                    <label className={labelCls}>Kata Sandi</label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className={labelCls}>Kata Sandi</label>
+                      <span className="text-[10px] text-slate-400 italic">
+                        (Kosongkan jika tidak ingin mengubah sandi)
+                      </span>
+                    </div>
                     <div className="relative">
-                      <input type={showPassword ? "text" : "password"} required value={editForm.password} onChange={e => setEditForm({...editForm, password: e.target.value})} className={`${inputCls} pr-10 font-mono`} placeholder="Minimal 6 karakter" />
+                      <input 
+                        type={showPassword ? "text" : "password"} 
+                        value={editForm.password} 
+                        onChange={e => setEditForm({...editForm, password: e.target.value})} 
+                        className={`${inputCls} pr-10 font-mono`} 
+                        placeholder="Masukkan kata sandi baru..." 
+                      />
                       <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-blue-600 transition-colors" title={showPassword ? "Sembunyikan sandi" : "Tampilkan sandi"}>
                         {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                       </button>

@@ -13,6 +13,7 @@ import {
   Phone,
   Copy,
   Layers,
+  Power,
 } from "lucide-react";
 
 const TABS = [
@@ -50,7 +51,6 @@ export default function Schedule() {
         const activeEnrollments = studentData.student_enrollments?.filter(
           (e) => e.status === "active"
         ) || [];
-
         const activeClassIds = activeEnrollments.map((e) => e.class_id);
 
         const cMapNames = {};
@@ -90,7 +90,6 @@ export default function Schedule() {
             phone: c.phone_number,
           };
         });
-
         setCoachesMap(cMap);
         setSessions(sessionData);
       } catch (err) {
@@ -99,6 +98,7 @@ export default function Schedule() {
         setLoading(false);
       }
     };
+
     fetchData();
   }, []);
 
@@ -122,6 +122,7 @@ export default function Schedule() {
   };
 
   let processedSessions = [...(grouped[activeTab] || [])];
+
   if (searchQuery) {
     const query = searchQuery.toLowerCase();
     processedSessions = processedSessions.filter((s) => {
@@ -157,7 +158,7 @@ export default function Schedule() {
           Jadwal Latihan Saya
         </h1>
         <p className="text-slate-500 mt-1 text-sm">
-          Informasi sesi renang aktif dan kontak instruktur yang bertugas.
+          Informasi sesi renang aktif, status gerbang pemindai, dan kontak instruktur yang bertugas.
         </p>
       </div>
 
@@ -203,7 +204,7 @@ export default function Schedule() {
           <div className="bg-white rounded-3xl border border-slate-200 py-16 px-4 text-center text-slate-400 shadow-sm">
             <BookOpen size={36} className="mx-auto mb-3 text-slate-300" />
             <p className="font-bold text-slate-700 text-sm">Tidak ada sesi yang ditemukan</p>
-            <p className="text-xs mt-1">Hanya sesi dari kelas yang berstatus aktif yang ditampilkan di sini.</p>
+            <p className="text-xs mt-1">Hanya sesi dari kelas yang aktif diikuti yang akan ditampilkan di sini.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -223,7 +224,9 @@ export default function Schedule() {
                 <div key={session.id} className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4 hover:shadow-md transition-shadow">
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-start gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                        session.is_active ? "bg-emerald-50 text-emerald-600" : "bg-blue-50 text-blue-600"
+                      }`}>
                         <CalendarDays size={20} />
                       </div>
                       <div>
@@ -235,17 +238,29 @@ export default function Schedule() {
                       </div>
                     </div>
 
-                    {/* Tag Kelas Aktif Terkait */}
-                    <div className="flex flex-wrap gap-1 justify-end shrink-0">
-                      {relevantClassNames.map((className, idx) => (
-                        <span
-                          key={idx}
-                          className="bg-blue-50 text-blue-700 border border-blue-100 px-2 py-0.5 rounded-lg text-[10px] font-bold flex items-center gap-1"
-                        >
-                          <Layers size={10} />
-                          {className}
-                        </span>
-                      ))}
+                    <div className="flex flex-col items-end gap-1.5 shrink-0">
+                      {/* Status Buka/Tutup Presensi QR */}
+                      <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border ${
+                        session.is_active
+                          ? "bg-emerald-500 text-white border-emerald-600 shadow-sm"
+                          : "bg-slate-100 text-slate-500 border-slate-200"
+                      }`}>
+                        <Power size={10} />
+                        {session.is_active ? "Gerbang Dibuka" : "Ditutup"}
+                      </span>
+
+                      {/* Tag Kelas Aktif Terkait */}
+                      <div className="flex flex-wrap gap-1 justify-end">
+                        {relevantClassNames.map((className, idx) => (
+                          <span
+                            key={idx}
+                            className="bg-blue-50 text-blue-700 border border-blue-100 px-2 py-0.5 rounded-lg text-[10px] font-bold flex items-center gap-1"
+                          >
+                            <Layers size={10} />
+                            {className}
+                          </span>
+                        ))}
+                      </div>
                     </div>
                   </div>
 
@@ -269,7 +284,6 @@ export default function Schedule() {
                                 </span>
                               )}
                             </div>
-
                             {coach.phone ? (
                               <button
                                 type="button"

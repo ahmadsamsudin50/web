@@ -13,7 +13,15 @@ import {
   CreditCard,
   Users,
   Loader2,
+  Tag,
 } from "lucide-react";
+
+const CATEGORY_OPTIONS = [
+  { value: "anak-anak", label: "Anak-anak" },
+  { value: "dewasa", label: "Dewasa" },
+  { value: "profesional", label: "Profesional" },
+  { value: "intensif", label: "Intensif" },
+];
 
 function ConfirmModal({
   isOpen,
@@ -31,7 +39,7 @@ function ConfirmModal({
         <div className="p-8 flex flex-col items-center text-center">
           <div
             className={`w-16 h-16 rounded-full flex items-center justify-center mb-5 ${
-              isDestructive ? "bg-rose-50" : "bg-amber-50"
+              isDestructive ? "bg-rose-50 text-rose-500" : "bg-amber-50"
             }`}
           >
             <AlertTriangle
@@ -71,15 +79,16 @@ export default function ClassManage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [currentId, setCurrentId] = useState(null);
+  const [originalName, setOriginalName] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
-
+  const [filterCategory, setFilterCategory] = useState("all");
   const [form, setForm] = useState({
     name: "",
+    category: "anak-anak",
     max_sessions: 12,
     price: 0,
     max_capacity: 20,
   });
-
   const [confirmModal, setConfirmModal] = useState({
     open: false,
     id: null,
@@ -92,12 +101,12 @@ export default function ClassManage() {
       const [classRes, enrollRes] = await Promise.all([
         supabase
           .from("classes")
-          .select("id, name, price, max_sessions, max_capacity, created_at")
+          .select("id, name, category, price, max_sessions, max_capacity, created_at")
           .order("created_at", { ascending: false }),
         supabase
           .from("student_enrollments")
           .select("class_id")
-          .in("status", ["active", "completed"]),
+          .eq("status", "active"), // SINKRONISASI KUOTA (P2): Hanya hitung atlet berstatus active
       ]);
 
       if (classRes.error) throw classRes.error;
@@ -110,9 +119,9 @@ export default function ClassManage() {
 
       const classesWithCount = (classRes.data || []).map((c) => ({
         ...c,
+        category: c.category || "anak-anak",
         enrolled_count: countMap[c.id] || 0,
       }));
-
       setClasses(classesWithCount);
     } catch (err) {
       toast.error(`Gagal memuat kelas: ${err.message}`);
@@ -128,44 +137,70 @@ export default function ClassManage() {
   const openAddModal = () => {
     setForm({
       name: "",
+      category: "anak-anak",
       max_sessions: 12,
       price: 0,
       max_capacity: 20,
     });
     setIsEditing(false);
     setCurrentId(null);
+    setOriginalName("");
     setIsModalOpen(true);
   };
 
   const openEditModal = (c) => {
     setForm({
       name: c.name || "",
+      category: c.category || "anak-anak",
       max_sessions: c.max_sessions ?? 12,
       price: c.price !== null && c.price !== undefined ? Number(c.price) : 0,
       max_capacity: c.max_capacity ?? 20,
     });
     setIsEditing(true);
     setCurrentId(c.id);
+    setOriginalName(c.name || "");
     setIsModalOpen(true);
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    const cleanName = form.name.trim();
+
+    if (!cleanName) {
+      toast.error("Nama kelas tidak boleh kosong.");
+      return;
+    }
+
+    // P3: Validasi nama kelas duplikat
+    const isDuplicate = classes.some(
+      (c) => c.name.toLowerCase() === cleanName.toLowerCase() && c.id !== currentId
+    );
+    if (isDuplicate) {
+      toast.error(`Nama kelas "${cleanName}" sudah digunakan.`);
+      return;
+    }
+
     const loadingToast = toast.loading(
       isEditing ? "Memperbarui data kelas..." : "Menyimpan kelas baru..."
     );
 
     const rawPrice = String(form.price).replace(/[^0-9]/g, "");
     const parsedPrice = rawPrice === "" ? 0 : parseFloat(rawPrice);
-
     const payload = {
-      name: form.name.trim(),
+      name: cleanName,
+      category: form.category,
       max_sessions: parseInt(form.max_sessions, 10) || 12,
       price: isNaN(parsedPrice) ? 0 : parsedPrice,
       max_capacity: parseInt(form.max_capacity, 10) || 20,
     };
 
     try {
+      const formatRupiahText = new Intl.NumberFormat("id-ID", {
+        style: "currency",
+        currency: "IDR",
+        minimumFractionDigits: 0,
+      }).format(parsedPrice);
+
       if (isEditing) {
         const { data, error } = await supabase
           .from("classes")
@@ -175,9 +210,24 @@ export default function ClassManage() {
 
         if (error) throw error;
         if (!data || data.length === 0) {
-          throw new Error(
-            "Tidak ada baris yang diperbarui. Pastikan izin akses (RLS) PostgreSQL telah diaktifkan."
-          );
+          throw new Error("Tidak ada baris yang diperbarui. Periksa izin RLS pada tabel classes.");
+        }
+
+        // P3: Sinkronkan ke landing_courses (cari berdasarkan originalName atau nama baru)
+        const { data: matchedLanding } = await supabase
+          .from("landing_courses")
+          .select("id")
+          .or(`title.ilike.${originalName.trim()},title.ilike.${cleanName}`)
+          .limit(1);
+
+        if (matchedLanding && matchedLanding.length > 0) {
+          await supabase
+            .from("landing_courses")
+            .update({
+              title: cleanName,
+              price: `${formatRupiahText} / Paket`,
+            })
+            .eq("id", matchedLanding[0].id);
         }
 
         toast.success("Kelas berhasil diperbarui!", { id: loadingToast });
@@ -189,9 +239,26 @@ export default function ClassManage() {
 
         if (error) throw error;
         if (!data || data.length === 0) {
-          throw new Error(
-            "Gagal menambahkan data. Periksa kebijakan RLS pada tabel classes."
-          );
+          throw new Error("Gagal menambahkan data. Periksa izin RLS pada tabel classes.");
+        }
+
+        // P3: Otomatis tambahkan entri display dasar di landing_courses jika belum ada
+        const { data: existingLanding } = await supabase
+          .from("landing_courses")
+          .select("id")
+          .ilike("title", cleanName)
+          .maybeSingle();
+
+        if (!existingLanding) {
+          await supabase.from("landing_courses").insert([
+            {
+              title: cleanName,
+              price: `${formatRupiahText} / Paket`,
+              description: `Program latihan renang kategori ${form.category}.`,
+              icon_name: "Droplets",
+              features: [`Maksimal ${payload.max_sessions} Sesi Pertemuan`, "Instruktur Bersertifikat"],
+            },
+          ]);
         }
 
         toast.success("Kelas baru berhasil dibuat!", { id: loadingToast });
@@ -210,22 +277,24 @@ export default function ClassManage() {
 
   const handleDelete = async () => {
     const classId = confirmModal.id;
-    const loadingToast = toast.loading("Memeriksa relasi dan menghapus...");
+    const className = confirmModal.name;
+    const loadingToast = toast.loading("Memeriksa dependensi dan menghapus...");
     setConfirmModal({ open: false, id: null, name: "" });
 
     try {
+      // 1. Cek pendaftaran aktif
       const { count: enrollCount, error: enrollErr } = await supabase
         .from("student_enrollments")
         .select("*", { count: "exact", head: true })
-        .eq("class_id", classId);
+        .eq("class_id", classId)
+        .eq("status", "active");
 
       if (enrollErr) throw enrollErr;
       if (enrollCount > 0) {
-        throw new Error(
-          `Tidak dapat menghapus. Masih ada ${enrollCount} pendaftaran siswa di kelas ini.`
-        );
+        throw new Error(`Tidak dapat menghapus. Masih ada ${enrollCount} pendaftaran aktif di kelas ini.`);
       }
 
+      // 2. Cek transaksi pembayaran terkait
       const { count: payCount, error: payErr } = await supabase
         .from("payments")
         .select("*", { count: "exact", head: true })
@@ -233,11 +302,27 @@ export default function ClassManage() {
 
       if (payErr) throw payErr;
       if (payCount > 0) {
-        throw new Error(
-          `Tidak dapat menghapus. Terdapat ${payCount} catatan riwayat pembayaran untuk kelas ini.`
-        );
+        throw new Error(`Tidak dapat menghapus. Terdapat ${payCount} catatan transaksi pembayaran untuk kelas ini.`);
       }
 
+      // 3. Bersihkan referensi class_id pada array sesi jadwal (P3)
+      const { data: sessionsWithClass } = await supabase
+        .from("sessions")
+        .select("id, class_ids");
+
+      if (sessionsWithClass) {
+        for (const s of sessionsWithClass) {
+          if (Array.isArray(s.class_ids) && s.class_ids.includes(classId)) {
+            const updatedClassIds = s.class_ids.filter((id) => id !== classId);
+            await supabase
+              .from("sessions")
+              .update({ class_ids: updatedClassIds })
+              .eq("id", s.id);
+          }
+        }
+      }
+
+      // 4. Hapus baris kelas
       const { error: deleteErr } = await supabase
         .from("classes")
         .delete()
@@ -245,7 +330,15 @@ export default function ClassManage() {
 
       if (deleteErr) throw deleteErr;
 
-      toast.success("Kelas berhasil dihapus", { id: loadingToast });
+      // 5. Bersihkan data display di landing_courses agar tidak meninggalkan data yatim (P3)
+      if (className) {
+        await supabase
+          .from("landing_courses")
+          .delete()
+          .ilike("title", className.trim());
+      }
+
+      toast.success("Kelas berhasil dihapus.", { id: loadingToast });
       fetchClasses();
     } catch (err) {
       toast.error(err.message, { id: loadingToast });
@@ -260,17 +353,31 @@ export default function ClassManage() {
     }).format(Number(number) || 0);
   };
 
-  const filteredClasses = classes.filter((c) =>
-    c.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const getCategoryBadge = (cat) => {
+    switch (cat) {
+      case "anak-anak":
+        return "bg-cyan-50 text-cyan-700 border-cyan-200";
+      case "dewasa":
+        return "bg-blue-50 text-blue-700 border-blue-200";
+      case "profesional":
+        return "bg-purple-50 text-purple-700 border-purple-200";
+      case "intensif":
+        return "bg-amber-50 text-amber-700 border-amber-200";
+      default:
+        return "bg-slate-50 text-slate-700 border-slate-200";
+    }
+  };
+
+  const filteredClasses = classes.filter((c) => {
+    const matchQuery = c.name.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchCat = filterCategory === "all" || c.category === filterCategory;
+    return matchQuery && matchCat;
+  });
 
   return (
     <div className="min-h-screen bg-[#f8fafc] p-4 md:p-8 font-sans relative">
-      <Toaster
-        position="top-right"
-        toastOptions={{ style: { borderRadius: "16px", fontWeight: "500" } }}
-      />
-      
+      <Toaster position="top-right" toastOptions={{ style: { borderRadius: "16px", fontWeight: "500" } }} />
+
       <ConfirmModal
         isOpen={confirmModal.open}
         onClose={() => setConfirmModal({ open: false, id: null, name: "" })}
@@ -279,10 +386,7 @@ export default function ClassManage() {
         message={
           <>
             Apakah Anda yakin ingin menghapus kelas{" "}
-            <span className="font-bold text-slate-700">
-              "{confirmModal.name}"
-            </span>
-            ? Tindakan ini tidak dapat dibatalkan.
+            <span className="font-bold text-slate-700">"{confirmModal.name}"</span>? Seluruh penugasan jadwal dan data halaman utama terkait akan ikut disinkronkan.
           </>
         }
         confirmLabel="Ya, Hapus"
@@ -290,33 +394,45 @@ export default function ClassManage() {
 
       <div className="max-w-7xl mx-auto mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">
-            Tingkat Kelas
-          </h1>
+          <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">Tingkat Kelas</h1>
           <p className="text-slate-500 mt-1 text-sm">
-            Kelola kelompok latihan, kuota kapasitas, dan harga paket.
+            Kelola kelompok latihan, kategori tingkatan, kuota kapasitas, dan biaya kursus.
           </p>
         </div>
         <button
           onClick={openAddModal}
           className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-2xl shadow-lg shadow-blue-600/30 transition-all active:scale-95"
         >
-          <Plus size={18} />
-          Kelas Baru
+          <Plus size={18} /> Kelas Baru
         </button>
       </div>
 
-      <div className="max-w-7xl mx-auto mb-6 relative">
-        <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-          <Search size={18} className="text-slate-400" />
+      <div className="max-w-7xl mx-auto mb-6 flex flex-col sm:flex-row gap-3">
+        <div className="relative flex-1">
+          <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+            <Search size={18} className="text-slate-400" />
+          </div>
+          <input
+            type="text"
+            placeholder="Cari nama kelas..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-11 pr-4 py-3.5 bg-white border border-slate-200 rounded-2xl text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all shadow-sm font-medium"
+          />
         </div>
-        <input
-          type="text"
-          placeholder="Cari kelas..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full pl-11 pr-4 py-3.5 bg-white border border-slate-200 rounded-2xl text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all shadow-sm font-medium"
-        />
+
+        <select
+          value={filterCategory}
+          onChange={(e) => setFilterCategory(e.target.value)}
+          className="px-4 py-3.5 bg-white border border-slate-200 rounded-2xl text-sm font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer shadow-sm"
+        >
+          <option value="all">Semua Kategori</option>
+          {CATEGORY_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
       </div>
 
       <div className="max-w-7xl mx-auto bg-white rounded-3xl shadow-xl shadow-blue-900/5 border border-slate-100 overflow-hidden">
@@ -331,6 +447,7 @@ export default function ClassManage() {
             <thead>
               <tr className="bg-slate-50/50 text-slate-400 text-[11px] uppercase tracking-widest font-black">
                 <th className="px-8 py-4">Detail Kelas</th>
+                <th className="px-6 py-4">Kategori</th>
                 <th className="px-6 py-4">Harga</th>
                 <th className="px-6 py-4">Kapasitas Terisi</th>
                 <th className="px-8 py-4 text-right">Aksi</th>
@@ -339,7 +456,7 @@ export default function ClassManage() {
             <tbody className="divide-y divide-slate-50">
               {loading ? (
                 <tr>
-                  <td colSpan="4" className="py-16 text-center text-slate-400">
+                  <td colSpan="5" className="py-16 text-center text-slate-400">
                     <Loader2 size={32} className="animate-spin mx-auto text-blue-600 mb-2" />
                     <p className="text-sm font-medium">Memuat data kelas...</p>
                   </td>
@@ -350,7 +467,6 @@ export default function ClassManage() {
                   const enrolled = c.enrolled_count ?? 0;
                   const isFull = enrolled >= maxCap;
                   const percent = Math.min(Math.round((enrolled / maxCap) * 100), 100);
-
                   return (
                     <tr key={c.id} className="hover:bg-blue-50/30 transition-colors">
                       <td className="px-8 py-5">
@@ -359,15 +475,18 @@ export default function ClassManage() {
                             <Layers size={20} />
                           </div>
                           <div>
-                            <div className="font-bold text-slate-800 text-base">
-                              {c.name}
-                            </div>
+                            <div className="font-bold text-slate-800 text-base">{c.name}</div>
                             <div className="text-xs text-slate-400 mt-0.5 font-medium flex items-center gap-1.5">
-                              <Bookmark size={12} className="text-blue-500" /> Maks{" "}
-                              {c.max_sessions ?? 12} Sesi Pertemuan
+                              <Bookmark size={12} className="text-blue-500" /> Maks {c.max_sessions ?? 12} Sesi Pertemuan
                             </div>
                           </div>
                         </div>
+                      </td>
+                      <td className="px-6 py-5">
+                        <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${getCategoryBadge(c.category)}`}>
+                          <Tag size={10} />
+                          {CATEGORY_OPTIONS.find((opt) => opt.value === c.category)?.label || c.category}
+                        </span>
                       </td>
                       <td className="px-6 py-5">
                         <div className="font-bold text-emerald-600 text-sm flex items-center gap-1.5">
@@ -380,7 +499,7 @@ export default function ClassManage() {
                           <div className="flex items-center justify-between text-xs mb-1.5 font-medium">
                             <span className="flex items-center gap-1.5 text-slate-700">
                               <Users size={14} className="text-indigo-500" />
-                              <span className="font-bold">{enrolled}</span> / {maxCap} Siswa
+                              <span className="font-bold">{enrolled}</span> / {maxCap} Siswa Aktif
                             </span>
                             <span
                               className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
@@ -426,14 +545,12 @@ export default function ClassManage() {
               )}
               {filteredClasses.length === 0 && !loading && (
                 <tr>
-                  <td colSpan="4" className="px-6 py-16 text-center text-slate-400">
+                  <td colSpan="5" className="px-6 py-16 text-center text-slate-400">
                     <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
                       <Search size={32} className="text-slate-300" />
                     </div>
                     <p className="font-bold text-slate-600">Tidak ada kelas ditemukan</p>
-                    <p className="text-sm mt-1">
-                      Mulai dengan menambahkan kelas latihan baru.
-                    </p>
+                    <p className="text-sm mt-1">Coba ganti filter kategori atau kata kunci pencarian.</p>
                   </td>
                 </tr>
               )}
@@ -459,25 +576,42 @@ export default function ClassManage() {
                 <X size={20} />
               </button>
             </div>
-            
+
             <form onSubmit={handleSubmit} className="p-8">
-              <div className="space-y-5 mb-8">
-                <div className="space-y-2">
+              <div className="space-y-4 mb-8">
+                <div className="space-y-1.5">
                   <label className="text-xs font-bold text-slate-400 uppercase tracking-wider ml-1">
                     Nama Kelas
                   </label>
                   <input
                     required
                     autoFocus
-                    placeholder="misal: Kelas Pemula (Beginner)"
+                    placeholder="misal: Kelas Pemula Anak (Beginner)"
                     value={form.name}
                     onChange={(e) => setForm({ ...form, name: e.target.value })}
-                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-4 text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all shadow-inner font-medium text-slate-700"
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-3.5 text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all shadow-inner font-medium text-slate-700"
                   />
                 </div>
 
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider ml-1">
+                    Kategori Kelas
+                  </label>
+                  <select
+                    value={form.category}
+                    onChange={(e) => setForm({ ...form, category: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-3.5 text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all shadow-inner font-bold text-slate-700 cursor-pointer"
+                  >
+                    {CATEGORY_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
+                  <div className="space-y-1.5">
                     <label className="text-xs font-bold text-slate-400 uppercase tracking-wider ml-1">
                       Maks Target Sesi
                     </label>
@@ -490,13 +624,12 @@ export default function ClassManage() {
                       onChange={(e) =>
                         setForm({ ...form, max_sessions: parseInt(e.target.value, 10) || 0 })
                       }
-                      className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-4 text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all shadow-inner font-medium text-slate-700"
+                      className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-3.5 text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all shadow-inner font-medium text-slate-700"
                     />
                   </div>
-
-                  <div className="space-y-2">
+                  <div className="space-y-1.5">
                     <label className="text-xs font-bold text-slate-400 uppercase tracking-wider ml-1">
-                      Kapasitas Kuota (Siswa)
+                      Kapasitas Kuota
                     </label>
                     <input
                       required
@@ -507,12 +640,12 @@ export default function ClassManage() {
                       onChange={(e) =>
                         setForm({ ...form, max_capacity: parseInt(e.target.value, 10) || 0 })
                       }
-                      className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-4 text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all shadow-inner font-medium text-slate-700"
+                      className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-3.5 text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all shadow-inner font-medium text-slate-700"
                     />
                   </div>
                 </div>
 
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   <label className="text-xs font-bold text-slate-400 uppercase tracking-wider ml-1">
                     Biaya Pendaftaran / Harga (IDR)
                   </label>
@@ -527,8 +660,13 @@ export default function ClassManage() {
                       step="1000"
                       placeholder="350000"
                       value={form.price}
-                      onChange={(e) => setForm({ ...form, price: e.target.value === "" ? 0 : parseFloat(e.target.value) })}
-                      className="w-full bg-slate-50 border border-slate-100 rounded-2xl pl-12 pr-5 py-4 text-sm focus:ring-2 focus:ring-emerald-500 focus:bg-white outline-none transition-all shadow-inner font-bold text-emerald-700"
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          price: e.target.value === "" ? 0 : parseFloat(e.target.value),
+                        })
+                      }
+                      className="w-full bg-slate-50 border border-slate-100 rounded-2xl pl-12 pr-5 py-3.5 text-sm focus:ring-2 focus:ring-emerald-500 focus:bg-white outline-none transition-all shadow-inner font-bold text-emerald-700"
                     />
                   </div>
                 </div>

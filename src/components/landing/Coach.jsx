@@ -1,8 +1,7 @@
 import React, { useEffect, useState, useRef } from "react";
 import { supabase } from "../../utils/supabaseClient";
-import { ChevronLeft, ChevronRight, Award, User, MapPin } from "lucide-react";
+import { ChevronLeft, ChevronRight, Award, Search, X } from "lucide-react";
 
-// ===== ICON COMPONENTS =====
 const InstagramIcon = ({ size = 15 }) => (
   <svg
     width={size}
@@ -52,7 +51,6 @@ const LinkedinIcon = ({ size = 15 }) => (
   </svg>
 );
 
-// ===== COACH CARD COMPONENT =====
 function CoachCard({ c, isTouch }) {
   const [flipped, setFlipped] = useState(false);
   const imgRef = useRef(null);
@@ -82,7 +80,6 @@ function CoachCard({ c, isTouch }) {
     <div className="w-full h-full flex flex-col justify-between group/card select-none">
       <div className={`flip-card w-full aspect-[4/5] rounded-[2rem] overflow-hidden mb-5 ${flipped ? "is-flipped" : ""}`}>
         <div className="flip-card-inner">
-          {/* SISI DEPAN */}
           <div
             className="flip-card-front rounded-[2rem] overflow-hidden cursor-pointer shadow-lg shadow-slate-900/5 group"
             onClick={handleToggle}
@@ -104,7 +101,6 @@ function CoachCard({ c, isTouch }) {
               />
               <div className="absolute inset-0 bg-gradient-to-t from-[#0A192F] via-[#0A192F]/40 to-transparent"></div>
 
-              {/* Tag Atas */}
               <div className="absolute top-4 right-4 z-20">
                 <span className="px-3 py-1 bg-white/15 backdrop-blur-md border border-white/20 text-cyan-300 text-[10px] font-black uppercase tracking-widest rounded-full shadow-sm">
                   {c.role}
@@ -117,7 +113,6 @@ function CoachCard({ c, isTouch }) {
                 </div>
               )}
 
-              {/* Informasi Bawah */}
               <div className="absolute bottom-0 left-0 right-0 p-6 z-20">
                 <p className="text-[11px] font-bold text-cyan-400 tracking-wider uppercase mb-1">
                   {c.speciality}
@@ -132,7 +127,6 @@ function CoachCard({ c, isTouch }) {
             </div>
           </div>
 
-          {/* SISI BELAKANG */}
           <div
             className="flip-card-back bg-[#0A192F] text-white rounded-[2rem] p-6 sm:p-7 flex flex-col justify-between border-2 border-cyan-400/40 shadow-xl cursor-pointer"
             onClick={handleToggle}
@@ -205,7 +199,6 @@ function CoachCard({ c, isTouch }) {
         </div>
       </div>
 
-      {/* Rincian Teks Bawah */}
       <div className="px-1">
         <div className="flex items-center justify-between gap-2 mb-1">
           <span className="text-[10px] font-bold text-cyan-600 uppercase tracking-widest">
@@ -226,25 +219,21 @@ function CoachCard({ c, isTouch }) {
   );
 }
 
-// ===== MAIN COMPONENT =====
 export default function Coach() {
   const [coaches, setCoaches] = useState([]);
-  const [index, setIndex] = useState(0);
-  const [visible, setVisible] = useState(3);
-  const [transitionEnabled, setTransitionEnabled] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [page, setPage] = useState(0);
+  const [isMobile, setIsMobile] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [isTouchDevice, setIsTouchDevice] = useState(false);
-  const containerRef = useRef(null);
-  const autoplayRef = useRef(null);
   const touchStartX = useRef(null);
-  const resizeTimeout = useRef(null);
+  const autoplayRef = useRef(null);
 
   useEffect(() => {
     const fetchCoaches = async () => {
       const { data, error } = await supabase
         .from("coaches")
-        .select(
-          `
+        .select(`
           id,
           specialty,
           nickname,
@@ -255,8 +244,7 @@ export default function Coach() {
           achievements,
           photo_url,
           users ( full_name )
-        `,
-        )
+        `)
         .eq("show_on_landing", true)
         .order("created_at", { ascending: true });
 
@@ -289,85 +277,46 @@ export default function Coach() {
       window.matchMedia("(hover: none)").matches;
     setIsTouchDevice(Boolean(touch));
 
-    const calc = () => {
-      const w = window.innerWidth;
-      const v = w >= 1024 ? 3 : w >= 640 ? 2 : 1;
-      setVisible(v);
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 1024);
     };
-
-    const onResize = () => {
-      clearTimeout(resizeTimeout.current);
-      resizeTimeout.current = setTimeout(calc, 150);
-    };
-    calc();
-    window.addEventListener("resize", onResize);
-    return () => {
-      window.removeEventListener("resize", onResize);
-      clearTimeout(resizeTimeout.current);
-    };
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  const n = coaches.length;
-  const clones = visible;
-  const displayed =
-    n > 0 ? [...coaches.slice(-clones), ...coaches, ...coaches.slice(0, clones)] : [];
-
   useEffect(() => {
-    setIndex(clones);
-  }, [visible, n]);
+    setPage(0);
+  }, [searchQuery, isMobile]);
 
-  const getSlideWidth = () => {
-    if (!containerRef.current) return 0;
-    return containerRef.current.clientWidth / visible;
-  };
+  const filteredCoaches = coaches.filter((c) => {
+    const q = searchQuery.toLowerCase();
+    return (
+      c.name.toLowerCase().includes(q) ||
+      c.nickname.toLowerCase().includes(q) ||
+      c.role.toLowerCase().includes(q) ||
+      c.speciality.toLowerCase().includes(q)
+    );
+  });
 
-  const translateX = () => `translateX(${-(index * getSlideWidth())}px)`;
-
-  useEffect(() => {
-    if (isPaused || n === 0) return;
-    autoplayRef.current = setInterval(() => setIndex((i) => i + 1), 4500);
-    return () => clearInterval(autoplayRef.current);
-  }, [isPaused, n]);
-
-  const pauseAndResume = (timeout = 4000) => {
-    setIsPaused(true);
-    clearInterval(autoplayRef.current);
-    setTimeout(() => setIsPaused(false), timeout);
-  };
-
-  const handleTransitionEnd = () => {
-    const maxIndex = clones + n - 1;
-    if (index > maxIndex) {
-      setTransitionEnabled(false);
-      setIndex(clones);
-    } else if (index < clones) {
-      setTransitionEnabled(false);
-      setIndex(maxIndex);
-    }
-  };
-
-  useEffect(() => {
-    if (!transitionEnabled) {
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => setTransitionEnabled(true));
-      });
-    }
-  }, [transitionEnabled]);
+  const step = isMobile ? 1 : 3;
+  const totalPages = Math.ceil(filteredCoaches.length / step);
 
   const prev = () => {
-    pauseAndResume();
-    setIndex((i) => i - 1);
+    setPage((p) => (p > 0 ? p - 1 : totalPages - 1));
   };
 
   const next = () => {
-    pauseAndResume();
-    setIndex((i) => i + 1);
+    setPage((p) => (p < totalPages - 1 ? p + 1 : 0));
   };
 
-  const goTo = (realIdx) => {
-    pauseAndResume();
-    setIndex(clones + realIdx);
-  };
+  useEffect(() => {
+    if (isPaused || totalPages <= 1) return;
+    autoplayRef.current = setInterval(() => {
+      setPage((p) => (p < totalPages - 1 ? p + 1 : 0));
+    }, 5000);
+    return () => clearInterval(autoplayRef.current);
+  }, [isPaused, totalPages]);
 
   const handleTouchStart = (e) => {
     touchStartX.current = e.touches[0].clientX;
@@ -377,26 +326,10 @@ export default function Coach() {
   const handleTouchEnd = (e) => {
     if (touchStartX.current === null) return;
     const diff = touchStartX.current - e.changedTouches[0].clientX;
-    if (diff > 50) setIndex((i) => i + 1);
-    if (diff < -50) setIndex((i) => i - 1);
+    if (diff > 50) next();
+    if (diff < -50) prev();
     touchStartX.current = null;
     setTimeout(() => setIsPaused(false), 1200);
-  };
-
-  const handleKeyDownRoot = (e) => {
-    if (e.key === "ArrowLeft") {
-      e.preventDefault();
-      prev();
-    } else if (e.key === "ArrowRight") {
-      e.preventDefault();
-      next();
-    } else if (e.key === "Home") {
-      e.preventDefault();
-      goTo(0);
-    } else if (e.key === "End") {
-      e.preventDefault();
-      goTo(n - 1);
-    }
   };
 
   return (
@@ -420,8 +353,7 @@ export default function Coach() {
       `}</style>
 
       <div className="max-w-7xl mx-auto relative">
-        {/* HEADER SECTION */}
-        <div className="text-center max-w-2xl mx-auto mb-16">
+        <div className="text-center max-w-2xl mx-auto mb-12">
           <span className="text-xs font-black uppercase tracking-[0.25em] text-blue-600 bg-blue-50 border border-blue-100 px-4 py-1.5 rounded-full inline-block mb-3">
             Tim Pelatih Profesional
           </span>
@@ -433,37 +365,51 @@ export default function Coach() {
           </p>
         </div>
 
-        {/* CAROUSEL WRAPPER */}
+        <div className="max-w-md mx-auto mb-12">
+          <div className="relative flex items-center">
+            <Search size={18} className="absolute left-4 text-blue-500 pointer-events-none" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Cari nama atau spesialisasi pelatih..."
+              className="w-full pl-11 pr-10 py-3 bg-white border border-slate-200 rounded-2xl text-xs sm:text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all shadow-sm"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery("")}
+                className="absolute right-3 p-1 text-slate-400 hover:text-slate-600 rounded-full transition-colors"
+                title="Hapus pencarian"
+              >
+                <X size={16} />
+              </button>
+            )}
+          </div>
+          {searchQuery && (
+            <p className="text-center text-xs text-slate-500 mt-2.5">
+              Menemukan {filteredCoaches.length} pelatih yang sesuai
+            </p>
+          )}
+        </div>
+
         <div
           className="relative px-2 sm:px-4"
           onMouseEnter={() => setIsPaused(true)}
           onMouseLeave={() => setIsPaused(false)}
-          ref={containerRef}
-          role="region"
-          aria-label="Carousel Pelatih"
-          tabIndex={0}
-          onKeyDown={handleKeyDownRoot}
-          onFocus={() => setIsPaused(true)}
-          onBlur={() => setIsPaused(false)}
         >
-          {/* TRACK VIEWPORT */}
           <div className="overflow-hidden w-full py-4">
             <div
-              className="flex items-stretch"
-              aria-live="polite"
-              onTransitionEnd={handleTransitionEnd}
+              className="flex transition-transform duration-500 ease-out"
               style={{
-                transform: translateX(),
-                transition: transitionEnabled ? "transform 0.5s cubic-bezier(0.25, 1, 0.5, 1)" : "none",
+                transform: `translateX(-${page * 100}%)`,
               }}
               onTouchStart={handleTouchStart}
               onTouchEnd={handleTouchEnd}
             >
-              {displayed.map((c, i) => (
+              {filteredCoaches.map((c) => (
                 <div
-                  key={`slide-${c.id || i}`}
-                  className="shrink-0 p-3 sm:p-4 box-border flex flex-col"
-                  style={{ width: `${100 / visible}%` }}
+                  key={c.id}
+                  className="w-full lg:w-1/3 shrink-0 p-3 sm:p-4 box-border flex flex-col"
                 >
                   <CoachCard c={c} isTouch={isTouchDevice} />
                 </div>
@@ -471,8 +417,17 @@ export default function Coach() {
             </div>
           </div>
 
-          {/* TOMBOL NAVIGASI SAMPING */}
-          {n > visible && (
+          {filteredCoaches.length === 0 && (
+            <div className="text-center py-16 bg-white rounded-3xl border border-slate-200 max-w-md mx-auto">
+              <p className="text-slate-400 text-sm font-medium">
+                {searchQuery
+                  ? `Tidak ada pelatih yang cocok dengan "${searchQuery}".`
+                  : "Belum ada profil pelatih yang dipublikasikan."}
+              </p>
+            </div>
+          )}
+
+          {totalPages > 1 && (
             <>
               <button
                 onClick={prev}
@@ -491,19 +446,20 @@ export default function Coach() {
             </>
           )}
 
-          {/* TITIK INDIKATOR (DOTS) */}
-          <div className="flex justify-center gap-2 mt-8">
-            {coaches.map((_, i) => (
-              <button
-                key={i}
-                className={`h-2 rounded-full transition-all duration-300 ${
-                  index - clones === i ? "w-7 bg-blue-600 shadow-sm shadow-blue-600/30" : "w-2 bg-slate-200 hover:bg-slate-300"
-                }`}
-                onClick={() => goTo(i)}
-                aria-label={`Lihat pelatih ke-${i + 1}`}
-              />
-            ))}
-          </div>
+          {totalPages > 1 && (
+            <div className="flex justify-center gap-2 mt-8">
+              {Array.from({ length: totalPages }).map((_, i) => (
+                <button
+                  key={i}
+                  className={`h-2 rounded-full transition-all duration-300 ${
+                    page === i ? "w-7 bg-blue-600 shadow-sm shadow-blue-600/30" : "w-2 bg-slate-200 hover:bg-slate-300"
+                  }`}
+                  onClick={() => setPage(i)}
+                  aria-label={`Lihat kelompok pelatih ke-${i + 1}`}
+                />
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </section>

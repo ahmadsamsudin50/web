@@ -18,6 +18,8 @@ import {
   Users,
   UserCheck,
   Eye,
+  Tag,
+  Layers,
 } from "lucide-react";
 
 function ConfirmModal({
@@ -91,6 +93,21 @@ const getStatusBadgeStyle = (status) => {
   return "bg-slate-200 text-slate-700 border-slate-300";
 };
 
+const getCategoryBadgeStyle = (category) => {
+  switch (category?.toLowerCase()) {
+    case "anak-anak":
+      return "bg-cyan-50 text-cyan-700 border-cyan-200";
+    case "dewasa":
+      return "bg-blue-50 text-blue-700 border-blue-200";
+    case "profesional":
+      return "bg-purple-50 text-purple-700 border-purple-200";
+    case "intensif":
+      return "bg-amber-50 text-amber-700 border-amber-200";
+    default:
+      return "bg-slate-100 text-slate-600 border-slate-200";
+  }
+};
+
 export default function SessionManage() {
   const [sessions, setSessions] = useState([]);
   const [classes, setClasses] = useState([]);
@@ -142,7 +159,7 @@ export default function SessionManage() {
 
   const loadDependencies = async () => {
     const [clsRes, cchRes] = await Promise.all([
-      supabase.from("classes").select("id, name").order("name"),
+      supabase.from("classes").select("id, name, category").order("name"),
       supabase
         .from("coaches")
         .select("id, users(full_name)")
@@ -308,10 +325,9 @@ export default function SessionManage() {
 
       let expectedStudents = [];
       if (s.class_ids && s.class_ids.length > 0) {
-        // Ambil atlet yang pendaftarannya berstatus 'active' pada kelas-kelas sesi ini
         const { data: enrollData } = await supabase
           .from("student_enrollments")
-          .select("id, student_id, class_id, classes(name, max_sessions), students(id, nis, users(full_name))")
+          .select("id, student_id, class_id, classes(name, category, max_sessions), students(id, nis, users(full_name))")
           .in("class_id", s.class_ids)
           .eq("status", "active");
 
@@ -497,6 +513,12 @@ export default function SessionManage() {
     belum_absen: sessionDetails.students.filter((s) => s.status === "belum_absen").length,
   };
 
+  // Helper dictionary lookup untuk menampilkan tag kelas di tabel utama
+  const classesLookup = {};
+  classes.forEach((c) => {
+    classesLookup[c.id] = c;
+  });
+
   return (
     <div className="min-h-screen bg-[#f8fafc] p-4 md:p-8 font-sans relative">
       <Toaster
@@ -664,12 +686,24 @@ export default function SessionManage() {
                           <div className="text-xs text-slate-400 mt-0.5 font-medium flex items-center gap-1.5">
                             <Clock size={12} /> {timeStr} WIB • {dateStr}
                           </div>
-                          <div className="flex gap-2 mt-1.5">
-                            <span className="text-[10px] font-bold px-2 py-0.5 bg-blue-50 text-blue-600 rounded">
-                              {s.class_ids?.length || 0} Kelas
-                            </span>
-                            <span className="text-[10px] font-bold px-2 py-0.5 bg-indigo-50 text-indigo-600 rounded">
-                              {s.coach_ids?.length || 0} Pelatih
+                          <div className="flex flex-wrap gap-1.5 mt-2">
+                            {s.class_ids?.map((cId) => {
+                              const cls = classesLookup[cId];
+                              if (!cls) return null;
+                              return (
+                                <span
+                                  key={cId}
+                                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold border ${getCategoryBadgeStyle(
+                                    cls.category,
+                                  )}`}
+                                >
+                                  <Tag size={9} />
+                                  {cls.name}
+                                </span>
+                              );
+                            })}
+                            <span className="text-[10px] font-bold px-2 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded">
+                              {s.coach_ids?.length || 0} Pelatih Bertugas
                             </span>
                           </div>
                         </div>
@@ -830,7 +864,7 @@ export default function SessionManage() {
                         <thead className="bg-slate-50 border-b border-slate-100">
                           <tr>
                             <th className="px-4 py-3 font-bold text-slate-500">Nama Atlet</th>
-                            <th className="px-4 py-3 font-bold text-slate-500">Kelas</th>
+                            <th className="px-4 py-3 font-bold text-slate-500">Kelas & Kategori</th>
                             <th className="px-4 py-3 font-bold text-slate-500 text-center">Waktu</th>
                             <th className="px-4 py-3 font-bold text-slate-500 text-right">Status</th>
                           </tr>
@@ -845,7 +879,16 @@ export default function SessionManage() {
                                 </div>
                               </td>
                               <td className="px-4 py-3 text-slate-600 font-medium">
-                                {std.classes?.name}
+                                <div className="flex items-center gap-1.5">
+                                  <span>{std.classes?.name}</span>
+                                  <span
+                                    className={`text-[9px] font-black uppercase px-1.5 py-0.2 rounded border ${getCategoryBadgeStyle(
+                                      std.classes?.category,
+                                    )}`}
+                                  >
+                                    {std.classes?.category || "Umum"}
+                                  </span>
+                                </div>
                               </td>
                               <td className="px-4 py-3 text-center text-slate-500 font-medium font-mono text-xs">
                                 {formatTimeOnly(std.scanned_at)}
@@ -957,7 +1000,7 @@ export default function SessionManage() {
               </button>
             </div>
             <form onSubmit={handleSubmit} className="flex flex-col overflow-hidden flex-1">
-              <div className="p-8 overflow-y-auto space-y-6">
+              <div className="p-8 overflow-y-auto space-y-6 custom-scrollbar">
                 <div className="space-y-4">
                   <div className="space-y-1.5">
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">
@@ -969,7 +1012,7 @@ export default function SessionManage() {
                       placeholder="Contoh: Latihan Pagi Sprint"
                       value={form.name}
                       onChange={(e) => setForm({ ...form, name: e.target.value })}
-                      className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-4 text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all shadow-inner font-medium text-slate-700"
+                      className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-3.5 text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all shadow-inner font-medium text-slate-700"
                     />
                   </div>
                   <div className="space-y-1.5">
@@ -981,7 +1024,7 @@ export default function SessionManage() {
                       required
                       value={form.session_date}
                       onChange={(e) => setForm({ ...form, session_date: e.target.value })}
-                      className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-4 text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all shadow-inner font-medium text-slate-700 cursor-pointer"
+                      className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-3.5 text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all shadow-inner font-medium text-slate-700 cursor-pointer"
                     />
                   </div>
                 </div>
@@ -991,25 +1034,41 @@ export default function SessionManage() {
                 <div className="space-y-6">
                   <div className="space-y-3">
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                      <Users size={14} className="text-blue-500" /> Kelas yang Ditugaskan
+                      <Layers size={14} className="text-blue-500" /> Kelas yang Ditugaskan
                     </label>
-                    <div className="grid grid-cols-2 gap-3 p-4 border border-slate-100 bg-slate-50 rounded-2xl">
-                      {classes.map((c) => (
-                        <label
-                          key={c.id}
-                          className="flex items-center gap-2.5 text-sm font-medium text-slate-700 cursor-pointer hover:text-blue-600 transition-colors"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={form.class_ids.includes(c.id)}
-                            onChange={() => toggleCheckbox("class_ids", c.id)}
-                            className="w-4 h-4 text-blue-600 bg-white border-slate-300 rounded focus:ring-blue-500 focus:ring-2 cursor-pointer"
-                          />
-                          {c.name}
-                        </label>
-                      ))}
+                    <div className="grid grid-cols-1 gap-2.5 p-4 border border-slate-100 bg-slate-50 rounded-2xl max-h-48 overflow-y-auto custom-scrollbar">
+                      {classes.map((c) => {
+                        const isChecked = form.class_ids.includes(c.id);
+                        return (
+                          <label
+                            key={c.id}
+                            className={`flex items-center justify-between p-2.5 rounded-xl border transition-all cursor-pointer ${
+                              isChecked
+                                ? "bg-blue-50/80 border-blue-200"
+                                : "bg-white border-slate-200/70 hover:border-slate-300"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5">
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => toggleCheckbox("class_ids", c.id)}
+                                className="w-4 h-4 text-blue-600 bg-white border-slate-300 rounded focus:ring-blue-500 focus:ring-2 cursor-pointer"
+                              />
+                              <span className="text-xs font-semibold text-slate-700">{c.name}</span>
+                            </div>
+                            <span
+                              className={`text-[9px] font-black uppercase px-2 py-0.5 rounded border ${getCategoryBadgeStyle(
+                                c.category,
+                              )}`}
+                            >
+                              {c.category || "Umum"}
+                            </span>
+                          </label>
+                        );
+                      })}
                       {classes.length === 0 && (
-                        <span className="text-xs text-slate-400 col-span-2">
+                        <span className="text-xs text-slate-400">
                           Tidak ada kelas yang tersedia.
                         </span>
                       )}
@@ -1020,21 +1079,28 @@ export default function SessionManage() {
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
                       <UserCheck size={14} className="text-indigo-500" /> Pelatih yang Ditugaskan
                     </label>
-                    <div className="grid grid-cols-1 gap-3 p-4 border border-slate-100 bg-slate-50 rounded-2xl">
-                      {coaches.map((c) => (
-                        <label
-                          key={c.id}
-                          className="flex items-center gap-2.5 text-sm font-medium text-slate-700 cursor-pointer hover:text-indigo-600 transition-colors"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={form.coach_ids.includes(c.id)}
-                            onChange={() => toggleCheckbox("coach_ids", c.id)}
-                            className="w-4 h-4 text-indigo-600 bg-white border-slate-300 rounded focus:ring-indigo-500 focus:ring-2 cursor-pointer"
-                          />
-                          {c.users?.full_name}
-                        </label>
-                      ))}
+                    <div className="grid grid-cols-1 gap-2 p-4 border border-slate-100 bg-slate-50 rounded-2xl max-h-40 overflow-y-auto custom-scrollbar">
+                      {coaches.map((c) => {
+                        const isChecked = form.coach_ids.includes(c.id);
+                        return (
+                          <label
+                            key={c.id}
+                            className={`flex items-center gap-2.5 p-2 rounded-xl border transition-all cursor-pointer ${
+                              isChecked
+                                ? "bg-indigo-50/80 border-indigo-200"
+                                : "bg-white border-slate-200/70 hover:border-slate-300"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => toggleCheckbox("coach_ids", c.id)}
+                              className="w-4 h-4 text-indigo-600 bg-white border-slate-300 rounded focus:ring-indigo-500 focus:ring-2 cursor-pointer"
+                            />
+                            <span className="text-xs font-medium text-slate-700">{c.users?.full_name}</span>
+                          </label>
+                        );
+                      })}
                       {coaches.length === 0 && (
                         <span className="text-xs text-slate-400">
                           Tidak ada pelatih yang tersedia.
@@ -1049,13 +1115,13 @@ export default function SessionManage() {
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-6 py-3 font-bold text-slate-500 hover:bg-slate-100 rounded-xl transition-colors"
+                  className="px-6 py-3 font-bold text-slate-500 hover:bg-slate-100 rounded-xl transition-colors text-sm"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
-                  className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg shadow-blue-600/30 transition-all active:scale-95"
+                  className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg shadow-blue-600/30 transition-all active:scale-95 text-sm"
                 >
                   {isEditing ? "Simpan Perubahan" : "Buka Sesi"}
                 </button>

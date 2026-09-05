@@ -11,6 +11,7 @@ import {
   Search,
   CheckSquare,
   Square,
+  Layers,
 } from "lucide-react";
 
 const getStatusBadgeStyle = (status) => {
@@ -73,8 +74,11 @@ export default function ManualEntry() {
     session_id: "",
     status: "hadir_manual",
   });
-
   const [existingLogsMap, setExistingLogsMap] = useState({});
+
+  // selectedAttendees:
+  // - Kategori Coach: coachId
+  // - Kategori Student: uniqueKey `${studentId}_${enrollmentId}`
   const [selectedAttendees, setSelectedAttendees] = useState([]);
   const [localSearch, setLocalSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -89,6 +93,7 @@ export default function ManualEntry() {
         .eq("is_active", true)
         .order("created_at", { ascending: false });
 
+      // Ambil enrollment yang berstatus 'active' atau 'completed' agar absensi yang baru saja lulus tetap bisa dikoreksi
       const { data: std, error: stdError } = await supabase
         .from("students")
         .select(`
@@ -128,19 +133,22 @@ export default function ManualEntry() {
     try {
       const { data: logs, error } = await supabase
         .from("attendance_logs")
-        .select("student_id, coach_id, status")
+        .select("student_id, coach_id, enrollment_id, status")
         .eq("session_id", sessionId);
 
       if (error) throw error;
-
       const map = {};
       (logs || []).forEach((log) => {
-        if (log.student_id) map[log.student_id] = log.status;
-        if (log.coach_id) map[log.coach_id] = log.status;
+        if (log.student_id && log.enrollment_id) {
+          map[`${log.student_id}_${log.enrollment_id}`] = log.status;
+        }
+        if (log.coach_id) {
+          map[log.coach_id] = log.status;
+        }
       });
       setExistingLogsMap(map);
     } catch (err) {
-      console.error("Gagal memuat log kehadiran sesi:", err.message);
+      console.error("Gagal memuat log presensi sesi:", err.message);
     }
   };
 
@@ -155,47 +163,72 @@ export default function ManualEntry() {
   };
 
   const activeSessionData = sessions.find((s) => s.id === form.session_id);
-
   let baseList = [];
+
   if (activeSessionData) {
     if (attendeeType === "student") {
-      baseList = students.filter((std) => {
-        return std.student_enrollments?.some(
-          (e) => e.status === "active" && activeSessionData.class_ids?.includes(e.class_id)
-        );
+      students.forEach((std) => {
+        // Tampilkan enrollment yang aktif di sesi ini, ATAU enrollment berstatus 'completed' yang sudah memiliki catatan log pada sesi ini (agar bisa dikoreksi statusnya)
+        const matchingEnrollments = std.student_enrollments?.filter((e) => {
+          const isClassInSession = activeSessionData.class_ids?.includes(e.class_id);
+          if (!isClassInSession) return false;
+          if (e.status === "active") return true;
+          if (e.status === "completed" && existingLogsMap[`${std.id}_${e.id}`]) return true;
+          return false;
+        }) || [];
+
+        matchingEnrollments.forEach((enr) => {
+          baseList.push({
+            uniqueKey: `${std.id}_${enr.id}`,
+            studentId: std.id,
+            enrollmentId: enr.id,
+            className: enr.classes?.name,
+            maxSessions: enr.classes?.max_sessions || 12,
+            enrollmentStatus: enr.status,
+            nis: std.nis,
+            fullName: std.users?.full_name,
+          });
+        });
       });
     } else {
-      baseList = coaches.filter((cch) =>
-        activeSessionData.coach_ids?.includes(cch.id)
-      );
+      baseList = (coaches || [])
+        .filter((cch) => activeSessionData.coach_ids?.includes(cch.id))
+        .map((cch) => ({
+          uniqueKey: cch.id,
+          coachId: cch.id,
+          specialty: cch.specialty,
+          fullName: cch.users?.full_name,
+        }));
     }
   }
 
   const filteredList = baseList.filter((item) => {
-    const name = item.users?.full_name?.toLowerCase() || "";
+    const name = item.fullName?.toLowerCase() || "";
     const identifier = attendeeType === "student" ? item.nis : item.specialty;
     const search = localSearch.toLowerCase();
+    const className = item.className?.toLowerCase() || "";
     return (
       name.includes(search) ||
+      className.includes(search) ||
       (identifier && identifier.toLowerCase().includes(search))
     );
   });
 
-  const toggleSelection = (id) => {
+  const toggleSelection = (key) => {
     setSelectedAttendees((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+      prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]
     );
   };
 
   const toggleSelectAll = () => {
-    const filteredIds = filteredList.map((i) => i.id);
-    const allSelected = filteredIds.length > 0 && filteredIds.every((id) =>
-      selectedAttendees.includes(id)
-    );
+    const filteredKeys = filteredList.map((i) => i.uniqueKey);
+    const allSelected =
+      filteredKeys.length > 0 && filteredKeys.every((key) => selectedAttendees.includes(key));
+
     if (allSelected) {
-      setSelectedAttendees((prev) => prev.filter((id) => !filteredIds.includes(id)));
+      setSelectedAttendees((prev) => prev.filter((key) => !filteredKeys.includes(key)));
     } else {
-      setSelectedAttendees((prev) => Array.from(new Set([...prev, ...filteredIds])));
+      setSelectedAttendees((prev) => Array.from(new Set([...prev, ...filteredKeys])));
     }
   };
 
@@ -214,73 +247,104 @@ export default function ManualEntry() {
     const loadingToast = toast.loading(`Menyimpan ${selectedAttendees.length} catatan kehadiran...`);
 
     try {
-      for (const attendeeId of selectedAttendees) {
-        const idField = attendeeType === "student" ? "student_id" : "coach_id";
-        let enrollmentId = null;
-        let maxSessions = 12;
+      for (const itemKey of selectedAttendees) {
+        const item = baseList.find((b) => b.uniqueKey === itemKey);
+        if (!item) continue;
 
         if (attendeeType === "student") {
-          const studentData = students.find((s) => s.id === attendeeId);
-          // Cari pendaftaran kelas yang aktif dan cocok dengan sesi latihan ini
-          const activeEnrollment = studentData?.student_enrollments?.find(
-            (e) => e.status === "active" && activeSessionData.class_ids?.includes(e.class_id)
-          );
-          if (activeEnrollment) {
-            enrollmentId = activeEnrollment.id;
-            maxSessions = activeEnrollment.classes?.max_sessions || 12;
+          const { data: existingLog } = await supabase
+            .from("attendance_logs")
+            .select("id, status")
+            .eq("session_id", form.session_id)
+            .eq("student_id", item.studentId)
+            .eq("enrollment_id", item.enrollmentId)
+            .maybeSingle();
+
+          if (existingLog) {
+            await supabase
+              .from("attendance_logs")
+              .update({
+                status: form.status,
+                scanned_at: new Date().toISOString(),
+              })
+              .eq("id", existingLog.id);
+          } else {
+            await supabase.from("attendance_logs").insert([
+              {
+                session_id: form.session_id,
+                student_id: item.studentId,
+                enrollment_id: item.enrollmentId,
+                status: form.status,
+                scanned_at: new Date().toISOString(),
+              },
+            ]);
           }
-        }
 
-        const { data: existingLog } = await supabase
-          .from("attendance_logs")
-          .select("id")
-          .eq("session_id", form.session_id)
-          .eq(idField, attendeeId)
-          .maybeSingle();
-
-        if (existingLog) {
-          const updatePayload = {
-            status: form.status,
-            scanned_at: new Date().toISOString(),
-          };
-          if (enrollmentId) updatePayload.enrollment_id = enrollmentId;
-          await supabase.from("attendance_logs").update(updatePayload).eq("id", existingLog.id);
-        } else {
-          const insertPayload = {
-            session_id: form.session_id,
-            [idField]: attendeeId,
-            status: form.status,
-          };
-          if (enrollmentId) insertPayload.enrollment_id = enrollmentId;
-          await supabase.from("attendance_logs").insert([insertPayload]);
-        }
-
-        // Jika siswa hadir dan kuota sesi kelas tersebut telah terpenuhi, ubah status pendaftaran kelas ini menjadi completed
-        if (
-          attendeeType === "student" &&
-          enrollmentId &&
-          (form.status === "hadir_manual" || form.status === "hadir_qr")
-        ) {
-          const { count: attendCount } = await supabase
+          // Sinkronisasi status kelulusan dua arah (P2)
+          const { count: validAttendCount } = await supabase
             .from("attendance_logs")
             .select("*", { count: "exact", head: true })
-            .eq("enrollment_id", enrollmentId)
+            .eq("enrollment_id", item.enrollmentId)
             .in("status", ["hadir_qr", "hadir_manual"]);
 
-          if (attendCount >= maxSessions) {
+          const totalAttend = validAttendCount || 0;
+
+          if (totalAttend >= item.maxSessions) {
+            // Target sesi terpenuhi -> Tandai selesai (completed)
             await supabase
               .from("student_enrollments")
-              .update({ status: "completed", completed_at: new Date().toISOString() })
-              .eq("id", enrollmentId);
+              .update({
+                status: "completed",
+                completed_at: new Date().toISOString(),
+              })
+              .eq("id", item.enrollmentId);
+          } else {
+            // Kehadiran di bawah target (misalnya status diubah ke izin/sakit/alpa) -> Kembalikan ke active
+            await supabase
+              .from("student_enrollments")
+              .update({
+                status: "active",
+                completed_at: null,
+              })
+              .eq("id", item.enrollmentId);
+          }
+        } else {
+          // Kategori Coach
+          const { data: existingLog } = await supabase
+            .from("attendance_logs")
+            .select("id")
+            .eq("session_id", form.session_id)
+            .eq("coach_id", item.coachId)
+            .maybeSingle();
+
+          if (existingLog) {
+            await supabase
+              .from("attendance_logs")
+              .update({
+                status: form.status,
+                scanned_at: new Date().toISOString(),
+              })
+              .eq("id", existingLog.id);
+          } else {
+            await supabase.from("attendance_logs").insert([
+              {
+                session_id: form.session_id,
+                coach_id: item.coachId,
+                status: form.status,
+                scanned_at: new Date().toISOString(),
+              },
+            ]);
           }
         }
       }
 
-      toast.success(`Berhasil mencatat kehadiran untuk ${selectedAttendees.length} orang!`, { id: loadingToast });
+      toast.success(`Berhasil memperbarui kehadiran untuk ${selectedAttendees.length} peserta!`, {
+        id: loadingToast,
+      });
       setSelectedAttendees([]);
       setLocalSearch("");
-      fetchSessionLogs(form.session_id);
-      loadData();
+      await fetchSessionLogs(form.session_id);
+      await loadData();
     } catch (error) {
       toast.error("Terjadi kendala saat menyimpan: " + error.message, { id: loadingToast });
     } finally {
@@ -306,7 +370,7 @@ export default function ManualEntry() {
           Entri Presensi Manual
         </h1>
         <p className="text-slate-500 mt-1 text-sm">
-          Pencatatan kehadiran massal atau penyesuaian status izin, sakit, dan alpa.
+          Pencatatan kehadiran massal atau penyesuaian status izin, sakit, dan alpa per kelas atlet.
         </p>
       </div>
 
@@ -314,13 +378,17 @@ export default function ManualEntry() {
         <form onSubmit={handleSubmit} className="flex flex-col md:flex-row gap-6">
           <div className="flex-1 space-y-4">
             <div className="space-y-1.5">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Kategori Peserta</label>
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                Kategori Peserta
+              </label>
               <div className="flex gap-2">
                 <button
                   type="button"
                   onClick={() => handleTypeChange("student")}
                   className={`flex-1 py-2.5 rounded-xl font-bold text-xs border flex items-center justify-center gap-2 transition-all ${
-                    attendeeType === "student" ? "bg-blue-600 text-white border-blue-600 shadow-sm" : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100"
+                    attendeeType === "student"
+                      ? "bg-blue-600 text-white border-blue-600 shadow-sm"
+                      : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100"
                   }`}
                 >
                   <Users size={16} /> Atlet
@@ -329,7 +397,9 @@ export default function ManualEntry() {
                   type="button"
                   onClick={() => handleTypeChange("coach")}
                   className={`flex-1 py-2.5 rounded-xl font-bold text-xs border flex items-center justify-center gap-2 transition-all ${
-                    attendeeType === "coach" ? "bg-blue-600 text-white border-blue-600 shadow-sm" : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100"
+                    attendeeType === "coach"
+                      ? "bg-blue-600 text-white border-blue-600 shadow-sm"
+                      : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100"
                   }`}
                 >
                   <UserPlus size={16} /> Pelatih
@@ -353,7 +423,9 @@ export default function ManualEntry() {
               >
                 <option value="">-- Pilih Sesi Latihan --</option>
                 {sessions.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
                 ))}
               </select>
             </div>
@@ -381,7 +453,8 @@ export default function ManualEntry() {
                 disabled={submitting || !form.session_id || selectedAttendees.length === 0}
                 className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-md disabled:opacity-50 transition-all active:scale-95"
               >
-                <Save size={16} /> {submitting ? "Menyimpan..." : `Simpan ${selectedAttendees.length} Kehadiran`}
+                <Save size={16} />{" "}
+                {submitting ? "Menyimpan..." : `Simpan ${selectedAttendees.length} Kehadiran`}
               </button>
             </div>
           </div>
@@ -393,7 +466,7 @@ export default function ManualEntry() {
                 <input
                   type="text"
                   disabled={!form.session_id}
-                  placeholder={`Cari nama ${attendeeType === "student" ? "atlet" : "pelatih"}...`}
+                  placeholder={`Cari nama ${attendeeType === "student" ? "atlet / kelas" : "pelatih"}...`}
                   value={localSearch}
                   onChange={(e) => setLocalSearch(e.target.value)}
                   className="w-full pl-9 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500 font-medium"
@@ -411,27 +484,24 @@ export default function ManualEntry() {
 
             <div className="flex-1 overflow-y-auto p-2">
               {!form.session_id ? (
-                <div className="h-full flex items-center justify-center text-slate-400 text-xs">Pilih sesi aktif terlebih dahulu</div>
+                <div className="h-full flex items-center justify-center text-slate-400 text-xs">
+                  Pilih sesi aktif terlebih dahulu
+                </div>
               ) : filteredList.length === 0 ? (
-                <div className="h-full flex items-center justify-center text-slate-400 text-xs">Tidak ada data ditemukan untuk sesi ini</div>
+                <div className="h-full flex items-center justify-center text-slate-400 text-xs">
+                  Tidak ada peserta ditemukan untuk sesi ini
+                </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {filteredList.map((item) => {
-                    const isSelected = selectedAttendees.includes(item.id);
-                    const currentStatus = existingLogsMap[item.id] || "belum_absen";
+                    const isSelected = selectedAttendees.includes(item.uniqueKey);
+                    const currentStatus = existingLogsMap[item.uniqueKey] || "belum_absen";
                     const styleConfig = getStatusBadgeStyle(currentStatus);
-
-                    // Ambil pendaftaran aktif yang sesuai dengan sesi latihan ini
-                    const relevantEnrollment = attendeeType === "student"
-                      ? item.student_enrollments?.find(
-                          (e) => e.status === "active" && activeSessionData?.class_ids?.includes(e.class_id)
-                        )
-                      : null;
 
                     return (
                       <div
-                        key={item.id}
-                        onClick={() => toggleSelection(item.id)}
+                        key={item.uniqueKey}
+                        onClick={() => toggleSelection(item.uniqueKey)}
                         className={`p-3 rounded-2xl border-2 flex items-start gap-2.5 cursor-pointer text-xs transition-all shadow-sm ${
                           isSelected
                             ? "ring-2 ring-blue-600 border-blue-600 bg-blue-50/90"
@@ -445,18 +515,30 @@ export default function ManualEntry() {
                             <Square size={16} className="text-slate-400" />
                           )}
                         </div>
-
                         <div className="truncate flex-1">
                           <div className="flex items-center justify-between gap-1 mb-1">
-                            <p className="font-bold truncate text-slate-800">{item.users?.full_name}</p>
-                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider border shrink-0 ${styleConfig.badge}`}>
+                            <p className="font-bold truncate text-slate-800">{item.fullName}</p>
+                            <span
+                              className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider border shrink-0 ${styleConfig.badge}`}
+                            >
                               {styleConfig.label}
                             </span>
                           </div>
-                          <p className="text-[10px] text-slate-500 font-medium truncate">
-                            {attendeeType === "student"
-                              ? `NIS: ${item.nis} • ${relevantEnrollment?.classes?.name || "Kelas"}`
-                              : item.specialty || "Pelatih"}
+                          <p className="text-[10px] text-slate-500 font-medium truncate flex items-center gap-1">
+                            {attendeeType === "student" ? (
+                              <>
+                                <Layers size={11} className="text-blue-500 shrink-0" />
+                                <span className="font-bold text-blue-700 truncate">{item.className}</span>
+                                <span>(NIS: {item.nis})</span>
+                                {item.enrollmentStatus === "completed" && (
+                                  <span className="text-[9px] font-bold text-amber-600 bg-amber-50 border border-amber-200 px-1 rounded ml-1">
+                                    Lulus
+                                  </span>
+                                )}
+                              </>
+                            ) : (
+                              item.specialty || "Pelatih"
+                            )}
                           </p>
                         </div>
                       </div>
@@ -473,7 +555,8 @@ export default function ManualEntry() {
               disabled={submitting || !form.session_id || selectedAttendees.length === 0}
               className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-md disabled:opacity-50 transition-all active:scale-95"
             >
-              <Save size={16} /> {submitting ? "Menyimpan..." : `Simpan ${selectedAttendees.length} Kehadiran`}
+              <Save size={16} />{" "}
+              {submitting ? "Menyimpan..." : `Simpan ${selectedAttendees.length} Kehadiran`}
             </button>
           </div>
         </form>

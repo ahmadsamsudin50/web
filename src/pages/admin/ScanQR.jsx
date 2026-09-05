@@ -11,23 +11,31 @@ import {
   Camera,
   AlertTriangle,
   RefreshCw,
+  Layers,
+  Sparkles,
+  Check,
 } from "lucide-react";
 
 function useAudioFeedback() {
   const audioCtx = useRef(null);
   const getCtx = useCallback(() => {
-    if (!audioCtx.current) {
-      audioCtx.current = new (window.AudioContext || window.webkitAudioContext)();
+    try {
+      if (!audioCtx.current) {
+        audioCtx.current = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtx.current.state === "suspended") {
+        audioCtx.current.resume();
+      }
+      return audioCtx.current;
+    } catch (_) {
+      return null;
     }
-    if (audioCtx.current.state === "suspended") {
-      audioCtx.current.resume();
-    }
-    return audioCtx.current;
   }, []);
 
   const playSuccess = useCallback(() => {
     try {
       const ctx = getCtx();
+      if (!ctx) return;
       [0, 0.18].forEach((startOffset, i) => {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
@@ -46,6 +54,7 @@ function useAudioFeedback() {
   const playError = useCallback(() => {
     try {
       const ctx = getCtx();
+      if (!ctx) return;
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.connect(gain);
@@ -81,10 +90,16 @@ export default function ScanQR() {
   const [cameraError, setCameraError] = useState("");
   const [isCameraStarting, setIsCameraStarting] = useState(false);
 
+  // Dialog pemilihan kelas jika atlet memiliki multi-kelas aktif di sesi ini
+  const [multiClassPrompt, setMultiClassPrompt] = useState({
+    isOpen: false,
+    student: null,
+    enrollments: [],
+  });
+
   const html5QrCodeRef = useRef(null);
   const isProcessingRef = useRef(false);
   const activeSessionsRef = useRef([]);
-
   const { playSuccess, playError } = useAudioFeedback();
   const { successVibrate, errorVibrate } = useHapticFeedback();
 
@@ -105,6 +120,79 @@ export default function ScanQR() {
     fetchActiveSessions();
   }, []);
 
+  // Eksekusi pencatatan presensi spesifik per enrollment_id (P2 & P3)
+  const recordAttendance = async (student, enrollment) => {
+    try {
+      // 1. Verifikasi akhir duplikasi presensi untuk enrollment spesifik ini
+      const { data: existingLog } = await supabase
+        .from("attendance_logs")
+        .select("id")
+        .eq("session_id", selectedSession)
+        .eq("student_id", student.id)
+        .eq("enrollment_id", enrollment.id)
+        .maybeSingle();
+
+      if (existingLog) {
+        throw new Error(`${student.users?.full_name || "Atlet"} sudah tercatat hadir untuk kelas ${enrollment.classes?.name}.`);
+      }
+
+      // 2. Insert log kehadiran baru
+      const { error: logError } = await supabase.from("attendance_logs").insert([
+        {
+          session_id: selectedSession,
+          student_id: student.id,
+          status: "hadir_qr",
+          enrollment_id: enrollment.id,
+          scanned_at: new Date().toISOString(),
+        },
+      ]);
+      if (logError) throw logError;
+
+      // 3. Hitung akumulasi kehadiran valid murid pada kelas ini
+      const { count: attendCount, error: countErr } = await supabase
+        .from("attendance_logs")
+        .select("*", { count: "exact", head: true })
+        .eq("enrollment_id", enrollment.id)
+        .in("status", ["hadir_qr", "hadir_manual"]);
+
+      if (countErr) throw countErr;
+
+      const currentTotal = attendCount || 1;
+      const maxSessions = enrollment.classes?.max_sessions || 12;
+      let isCompleted = false;
+
+      // 4. Perbarui status enrollment jika target sesi terpenuhi
+      if (currentTotal >= maxSessions) {
+        await supabase
+          .from("student_enrollments")
+          .update({
+            status: "completed",
+            completed_at: new Date().toISOString(),
+          })
+          .eq("id", enrollment.id);
+        isCompleted = true;
+      }
+
+      playSuccess();
+      successVibrate();
+
+      const message = isCompleted
+        ? `${student.users?.full_name} (${enrollment.classes?.name}): LULUS ${currentTotal}/${maxSessions} Sesi!`
+        : `${student.users?.full_name} (${enrollment.classes?.name}): Hadir (${currentTotal}/${maxSessions} Sesi)`;
+
+      setScanStatus({ type: "success", message });
+    } catch (err) {
+      playError();
+      errorVibrate();
+      setScanStatus({ type: "error", message: err.message });
+    } finally {
+      setTimeout(() => {
+        setScanStatus({ type: "idle", message: "" });
+        isProcessingRef.current = false;
+      }, 2500);
+    }
+  };
+
   const handleBarcodeDecoded = async (decodedText) => {
     if (isProcessingRef.current) return;
     isProcessingRef.current = true;
@@ -112,44 +200,32 @@ export default function ScanQR() {
     setScanStatus({ type: "info", message: "Memverifikasi Kode QR..." });
 
     try {
-      // 1. Identifikasi data atlet melalui token QR
+      // 1. Identifikasi profil atlet via QR token
       const { data: student, error: studentError } = await supabase
         .from("students")
         .select("id, users(full_name)")
-        .eq("qr_token", decodedText)
+        .eq("qr_token", decodedText.trim())
         .single();
 
-      if (studentError || !student) throw new Error("Kode QR tidak valid atau belum terdaftar.");
-
-      // 2. Cegah duplikasi absensi pada sesi yang sama
-      const { data: existingLog } = await supabase
-        .from("attendance_logs")
-        .select("id")
-        .eq("session_id", selectedSession)
-        .eq("student_id", student.id)
-        .maybeSingle();
-
-      if (existingLog) {
-        throw new Error(`${student.users?.full_name || "Atlet"} sudah melakukan presensi di sesi ini.`);
+      if (studentError || !student) {
+        throw new Error("Kode QR tidak valid atau data atlet tidak ditemukan.");
       }
 
-      // 3. Verifikasi konfigurasi kelas sesi yang dipilih
+      // 2. Ambil konfigurasi kelas dari sesi yang sedang aktif
       const sessionObj = activeSessionsRef.current.find((s) => s.id === selectedSession);
       if (!sessionObj || !sessionObj.class_ids || sessionObj.class_ids.length === 0) {
-        throw new Error("Konfigurasi sesi tidak valid (kelas latihan belum ditentukan).");
+        throw new Error("Sesi ini belum dikonfigurasi dengan kelas latihan.");
       }
 
-      // 4. Periksa apakah atlet memiliki pendaftaran yang berstatus 'active' pada kelas sesi ini
+      // 3. Ambil pendaftaran aktif atlet yang cocok dengan kelas di sesi ini
       const { data: enrollments, error: enrollError } = await supabase
         .from("student_enrollments")
         .select("id, class_id, status, classes(name, max_sessions)")
         .eq("student_id", student.id)
         .eq("status", "active")
-        .in("class_id", sessionObj.class_ids)
-        .limit(1);
+        .in("class_id", sessionObj.class_ids);
 
       if (enrollError || !enrollments || enrollments.length === 0) {
-        // Cek apakah sebenarnya pernah terdaftar tetapi statusnya sudah selesai (completed)
         const { data: completedEnrollment } = await supabase
           .from("student_enrollments")
           .select("id, classes(name)")
@@ -159,61 +235,51 @@ export default function ScanQR() {
           .limit(1);
 
         if (completedEnrollment && completedEnrollment.length > 0) {
-          throw new Error(`Masa latihan ${completedEnrollment[0].classes?.name || "kelas ini"} sudah selesai. Harap daftar ulang.`);
+          throw new Error(`Masa latihan kelas "${completedEnrollment[0].classes?.name}" telah selesai.`);
         }
 
-        throw new Error("Atlet tidak terdaftar aktif pada kelas di sesi latihan ini.");
+        throw new Error("Atlet tidak terdaftar aktif di kelompok kelas sesi ini.");
       }
 
-      const activeEnrollment = enrollments[0];
-
-      // 5. Masukkan catatan absensi dengan menyertakan enrollment_id kelas terkait
-      const { error: logError } = await supabase
+      // 4. Periksa log presensi atlet pada sesi ini untuk menentukan kelas yang belum diabsenkan
+      const { data: currentSessionLogs, error: logFetchError } = await supabase
         .from("attendance_logs")
-        .insert([
-          {
-            session_id: selectedSession,
-            student_id: student.id,
-            status: "hadir_qr",
-            enrollment_id: activeEnrollment.id,
-          },
-        ]);
+        .select("enrollment_id")
+        .eq("session_id", selectedSession)
+        .eq("student_id", student.id);
 
-      if (logError) throw logError;
+      if (logFetchError) throw logFetchError;
 
-      // 6. Hitung akumulasi kehadiran khusus untuk enrollment kelas ini
-      const { count: attendCount } = await supabase
-        .from("attendance_logs")
-        .select("*", { count: "exact", head: true })
-        .eq("enrollment_id", activeEnrollment.id)
-        .in("status", ["hadir_qr", "hadir_manual"]);
+      const attendedEnrollmentIds = new Set(
+        (currentSessionLogs || []).map((l) => l.enrollment_id).filter(Boolean)
+      );
 
-      const currentTotal = attendCount || 1;
-      const maxSessions = activeEnrollment.classes?.max_sessions || 12;
-      let isCompleted = false;
+      // Filter sisa pendaftaran kelas yang BELUM absen pada sesi ini
+      const unrecordedEnrollments = enrollments.filter(
+        (enr) => !attendedEnrollmentIds.has(enr.id)
+      );
 
-      // Jika jumlah kehadiran mencapai atau melampaui batas maksimal, tandai pendaftaran kelas ini menjadi 'completed'
-      if (currentTotal >= maxSessions) {
-        await supabase
-          .from("student_enrollments")
-          .update({ status: "completed", completed_at: new Date().toISOString() })
-          .eq("id", activeEnrollment.id);
-        isCompleted = true;
+      // Jika seluruh kelas atlet pada sesi ini sudah terabsenkan
+      if (unrecordedEnrollments.length === 0) {
+        throw new Error(`${student.users?.full_name || "Atlet"} sudah mencatat seluruh kehadiran kelasnya pada sesi ini.`);
       }
 
-      playSuccess();
-      successVibrate();
+      // 5. Jika tersisa lebih dari 1 kelas yang belum absen, buka dialog pemilihan kelas
+      if (unrecordedEnrollments.length > 1) {
+        setMultiClassPrompt({
+          isOpen: true,
+          student,
+          enrollments: unrecordedEnrollments,
+        });
+        return;
+      }
 
-      const message = isCompleted
-        ? `${student.users?.full_name} (${activeEnrollment.classes?.name}): Selesai ${currentTotal}/${maxSessions} sesi!`
-        : `${student.users?.full_name} (${activeEnrollment.classes?.name}): ${currentTotal}/${maxSessions} Sesi`;
-
-      setScanStatus({ type: "success", message });
+      // Jika hanya ada 1 kelas yang belum absen, langsung catat presensi
+      await recordAttendance(student, unrecordedEnrollments[0]);
     } catch (err) {
       playError();
       errorVibrate();
       setScanStatus({ type: "error", message: err.message });
-    } finally {
       setTimeout(() => {
         setScanStatus({ type: "idle", message: "" });
         isProcessingRef.current = false;
@@ -269,7 +335,6 @@ export default function ScanQR() {
           aspectRatio: 1.0,
         };
 
-        // facingMode: "environment" mengarahkan kamera ke kamera belakang pada perangkat seluler
         await qrCodeInstance.start(
           { facingMode: "environment" },
           config,
@@ -287,9 +352,9 @@ export default function ScanQR() {
         setIsCameraStarting(false);
         const errMsg = err?.message || String(err);
         if (errMsg.includes("NotAllowedError") || errMsg.includes("Permission denied")) {
-          setCameraError("Izin kamera ditolak. Silakan aktifkan izin kamera pada peramban Anda.");
+          setCameraError("Izin kamera ditolak. Aktifkan izin kamera pada browser Anda.");
         } else if (errMsg.includes("NotFoundError") || errMsg.includes("DevicesNotFoundError")) {
-          setCameraError("Kamera tidak terdeteksi pada perangkat ini.");
+          setCameraError("Kamera tidak ditemukan pada perangkat ini.");
         } else {
           setCameraError("Gagal mengakses kamera: " + errMsg);
         }
@@ -310,6 +375,51 @@ export default function ScanQR() {
   return (
     <div className="min-h-screen bg-[#f8fafc] p-4 md:p-8 font-sans">
       <Toaster position="top-right" />
+
+      {/* Dialog Pemilihan Kelas Multi-Enrollment */}
+      {multiClassPrompt.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-6 text-center animate-in zoom-in-95 duration-200">
+            <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto mb-3">
+              <Layers size={24} />
+            </div>
+            <h3 className="text-base font-bold text-slate-800">
+              Pilih Kelas Kehadiran
+            </h3>
+            <p className="text-xs text-slate-500 mt-1 mb-4 leading-relaxed">
+              Atlet <b>{multiClassPrompt.student?.users?.full_name}</b> memiliki lebih dari 1 kelas yang belum diabsenkan pada sesi ini:
+            </p>
+            <div className="space-y-2">
+              {multiClassPrompt.enrollments.map((enr) => (
+                <button
+                  key={enr.id}
+                  onClick={() => {
+                    const std = multiClassPrompt.student;
+                    setMultiClassPrompt({ isOpen: false, student: null, enrollments: [] });
+                    recordAttendance(std, enr);
+                  }}
+                  className="w-full p-3.5 bg-slate-50 hover:bg-blue-50 border border-slate-200 hover:border-blue-400 rounded-xl text-left text-xs font-bold text-slate-700 hover:text-blue-700 transition-all flex items-center justify-between group"
+                >
+                  <span className="truncate">{enr.classes?.name}</span>
+                  <span className="text-[10px] text-slate-400 group-hover:text-blue-600 shrink-0 font-medium">
+                    Catat Hadir →
+                  </span>
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => {
+                setMultiClassPrompt({ isOpen: false, student: null, enrollments: [] });
+                isProcessingRef.current = false;
+              }}
+              className="mt-4 text-xs font-bold text-slate-400 hover:text-slate-600"
+            >
+              Batalkan Presensi
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="max-w-7xl mx-auto mb-6">
         <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight flex items-center gap-3">
           <ScanLine className="text-blue-600" size={28} />
@@ -387,9 +497,15 @@ export default function ScanQR() {
             {selectedSession ? (
               <div className="w-full flex flex-col items-center">
                 {scanStatus.type !== "idle" && (
-                  <div className={`mb-4 px-4 py-3 rounded-xl flex items-center gap-3 w-full max-w-sm text-xs font-bold text-white shadow-md animate-in fade-in zoom-in-95 ${
-                    scanStatus.type === "success" ? "bg-emerald-600" : scanStatus.type === "error" ? "bg-rose-600" : "bg-blue-600"
-                  }`}>
+                  <div
+                    className={`mb-4 px-4 py-3 rounded-xl flex items-center gap-3 w-full max-w-sm text-xs font-bold text-white shadow-md animate-in fade-in zoom-in-95 ${
+                      scanStatus.type === "success"
+                        ? "bg-emerald-600"
+                        : scanStatus.type === "error"
+                        ? "bg-rose-600"
+                        : "bg-blue-600"
+                    }`}
+                  >
                     {scanStatus.type === "success" && <CheckCircle2 size={20} className="shrink-0" />}
                     {scanStatus.type === "error" && <XCircle size={20} className="shrink-0" />}
                     {scanStatus.type === "info" && <ScanLine size={20} className="animate-pulse shrink-0" />}
@@ -403,7 +519,7 @@ export default function ScanQR() {
                     <p className="font-bold text-sm">Gagal Mengakses Kamera</p>
                     <p className="text-xs text-rose-600 leading-relaxed">{cameraError}</p>
                     <p className="text-[11px] text-slate-500 pt-2">
-                      Pastikan situs diakses melalui protokol <b>HTTPS</b> atau <b>localhost</b> dan perizinan kamera sudah diizinkan.
+                      Pastikan peramban memiliki izin kamera dan situs dijalankan melalui <b>HTTPS</b> atau <b>localhost</b>.
                     </p>
                   </div>
                 ) : (

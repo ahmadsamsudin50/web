@@ -2,10 +2,10 @@ import React, { useEffect, useState, useRef, useCallback } from "react";
 import { supabase } from "../../utils/supabaseClient";
 import { QRCodeSVG } from "qrcode.react";
 import { toast, Toaster } from "react-hot-toast";
-import { 
-  Download, User, MapPin, Phone, 
+import {
+  Download, User, MapPin, Phone,
   ShieldCheck, Contact, Edit3, X, Save,
-  Mail, Lock, Eye, EyeOff, Calendar, Layers, CheckCircle2, AlertCircle, Bell, Info
+  Mail, Lock, Eye, EyeOff, Calendar, Layers, CheckCircle2, AlertCircle, Bell, Info, Clock
 } from "lucide-react";
 
 // Komponen Feed Pengumuman Khusus Atlet
@@ -82,6 +82,7 @@ function AnnouncementFeed() {
 
 export default function Profile() {
   const [studentData, setStudentData] = useState(null);
+  const [attendanceCounts, setAttendanceCounts] = useState({});
   const [loading, setLoading] = useState(true);
   const qrRef = useRef(null);
 
@@ -96,9 +97,9 @@ export default function Profile() {
     try {
       const savedUser = localStorage.getItem("user_session");
       if (!savedUser) throw new Error("Sesi berakhir. Silakan masuk kembali.");
-
       const user = JSON.parse(savedUser);
 
+      // Ambil data profil student beserta riwayat enrollment
       const { data, error } = await supabase
         .from("students")
         .select(`
@@ -111,6 +112,25 @@ export default function Profile() {
 
       if (error) throw error;
       setStudentData(data);
+
+      // Ambil akumulasi log presensi per enrollment spesifik (P2)
+      if (data?.id) {
+        const { data: logs, error: logsError } = await supabase
+          .from("attendance_logs")
+          .select("enrollment_id, status")
+          .eq("student_id", data.id)
+          .in("status", ["hadir_qr", "hadir_manual"]);
+
+        if (!logsError && logs) {
+          const counts = {};
+          logs.forEach((log) => {
+            if (log.enrollment_id) {
+              counts[log.enrollment_id] = (counts[log.enrollment_id] || 0) + 1;
+            }
+          });
+          setAttendanceCounts(counts);
+        }
+      }
     } catch (err) {
       toast.error("Gagal memuat data profil. Silakan hubungi admin.");
     } finally {
@@ -132,13 +152,11 @@ export default function Profile() {
       toast.error("Kode QR belum siap.", { id: loadingToast });
       return;
     }
-
     try {
       const svgData = new XMLSerializer().serializeToString(svgElement);
       const canvas = document.createElement("canvas");
       const ctx = canvas.getContext("2d");
       const img = new Image();
-
       img.onload = () => {
         const padding = 32;
         canvas.width = img.width + padding * 2;
@@ -147,7 +165,6 @@ export default function Profile() {
         ctx.fillStyle = "#ffffff";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(img, padding, padding);
-
         const pngUrl = canvas.toDataURL("image/png");
         const link = document.createElement("a");
         link.download = `Siripbiru_Pass_${studentData?.nis || "Atlet"}.png`;
@@ -183,30 +200,50 @@ export default function Profile() {
     const loadingToast = toast.loading("Menyimpan perubahan...");
 
     try {
-      const user = JSON.parse(localStorage.getItem("user_session"));
+      const user = JSON.parse(localStorage.getItem("user_session") || "{}");
+      const cleanEmail = editForm.email.trim().toLowerCase();
 
+      // P3: Validasi apakah email diubah dan sudah terdaftar pada user lain
+      if (cleanEmail !== user.email?.toLowerCase()) {
+        const { data: existingUser } = await supabase
+          .from("users")
+          .select("id")
+          .eq("email", cleanEmail)
+          .neq("id", user.id)
+          .maybeSingle();
+
+        if (existingUser) {
+          throw new Error("Alamat email baru sudah digunakan oleh akun lain.");
+        }
+      }
+
+      const trimmedPassword = editForm.password.trim();
       const userUpdateData = { 
-        full_name: editForm.full_name,
-        email: editForm.email
+        full_name: editForm.full_name.trim(),
+        email: cleanEmail
       };
-      if (editForm.password) {
-        userUpdateData.password = editForm.password;
+
+      if (trimmedPassword) {
+        if (trimmedPassword.length < 6) {
+          throw new Error("Kata sandi baru minimal harus 6 karakter.");
+        }
+        userUpdateData.password = trimmedPassword;
       }
 
       const { error: userError } = await supabase
         .from("users")
         .update(userUpdateData)
         .eq("id", user.id);
-      
+          
       if (userError) throw userError;
 
       const { error: studentError } = await supabase
         .from("students")
         .update({
-          parent_name: editForm.parent_name,
+          parent_name: editForm.parent_name.trim(),
           age: editForm.age ? parseInt(editForm.age, 10) : null,
-          phone_number: editForm.phone_number,
-          address: editForm.address
+          phone_number: editForm.phone_number.trim(),
+          address: editForm.address.trim()
         })
         .eq("user_id", user.id);
 
@@ -214,13 +251,11 @@ export default function Profile() {
 
       toast.success("Profil berhasil diperbarui!", { id: loadingToast });
       setIsEditModalOpen(false);
-      
       fetchProfile();
       
-      user.full_name = editForm.full_name;
-      user.email = editForm.email;
+      user.full_name = editForm.full_name.trim();
+      user.email = cleanEmail;
       localStorage.setItem("user_session", JSON.stringify(user));
-
     } catch (error) {
       toast.error(`Pembaruan gagal: ${error.message}`, { id: loadingToast });
     } finally {
@@ -252,7 +287,7 @@ export default function Profile() {
   return (
     <div className="py-6 flex flex-col items-center pb-24 lg:pb-6 font-sans relative px-4">
       <Toaster position="top-center" toastOptions={{ style: { borderRadius: '16px', fontWeight: '500' } }} />
-
+      
       {/* Papan Pengumuman Klub */}
       <AnnouncementFeed />
 
@@ -272,39 +307,43 @@ export default function Profile() {
               <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-lg mb-3 border border-white/10">
                 <span className="font-black text-lg">SB</span>
               </div>
-              <h2 className="text-white font-bold tracking-[0.2em] text-[10px] uppercase mb-4">
+              <h2 className="text-white font-bold tracking-[0.2em] text-[10px] uppercase mb-3">
                 Siripbiru Swim Club
               </h2>
               
-              <h3 className="text-xl font-bold text-white mb-1 leading-tight">
+              <h3 className="text-xl font-bold text-white mb-0.5 leading-tight">
                 {studentData.users?.full_name || "Atlet"}
               </h3>
-              <div className="text-cyan-300 text-[10px] font-medium tracking-widest uppercase mb-3">
+              <div className="text-cyan-300 text-[10px] font-medium tracking-widest uppercase mb-3.5">
                 {studentData.users?.email}
               </div>
               
-              {/* Daftar Status Tiap Kelas: Aktif vs Selesai */}
+              {/* Status Kelas & Progres Pertemuan (Mengutamakan kelas aktif di atas kelas lulus) */}
               <div className="flex flex-wrap justify-center gap-1.5 max-w-xs">
                 {allEnrollments.length > 0 ? (
-                  allEnrollments.map((enr, idx) => {
-                    const isActive = enr.status === "active";
-                    return (
-                      <div
-                        key={idx}
-                        className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase border ${
-                          isActive
-                            ? "bg-emerald-500/20 border-emerald-500/30 text-emerald-300"
-                            : "bg-slate-700/60 border-slate-600 text-slate-400 line-through"
-                        }`}
-                      >
-                        {isActive ? <CheckCircle2 size={10} /> : <AlertCircle size={10} />}
-                        <span>{enr.classes?.name}</span>
-                        <span className="text-[9px] lowercase font-normal">
-                          {isActive ? "(aktif)" : "(selesai)"}
-                        </span>
-                      </div>
-                    );
-                  })
+                  [...allEnrollments]
+                    .sort((a, b) => (a.status === "active" ? -1 : 1))
+                    .map((enr, idx) => {
+                      const isActive = enr.status === "active";
+                      const currentAttend = attendanceCounts[enr.id] || 0;
+                      const maxSessions = enr.classes?.max_sessions || 12;
+                      return (
+                        <div
+                          key={enr.id || idx}
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wider uppercase border shadow-sm ${
+                            isActive
+                              ? "bg-emerald-500/20 border-emerald-500/30 text-emerald-300"
+                              : "bg-slate-700/60 border-slate-600 text-slate-400"
+                          }`}
+                        >
+                          {isActive ? <CheckCircle2 size={11} /> : <AlertCircle size={11} />}
+                          <span>{enr.classes?.name}</span>
+                          <span className="text-[9px] font-mono px-1.5 py-0.2 bg-white/10 rounded-md">
+                            {isActive ? `${currentAttend}/${maxSessions}` : "Selesai"}
+                          </span>
+                        </div>
+                      );
+                    })
                 ) : (
                   <div className="inline-block px-3 py-1 bg-rose-500/20 border border-rose-500/30 rounded-full text-rose-200 text-[10px] font-bold tracking-wider uppercase">
                     Belum Ada Kelas Terdaftar
@@ -338,7 +377,7 @@ export default function Profile() {
             </p>
           </div>
 
-          {/* Rincian Profil Terpisah */}
+          {/* Rincian Data Pribadi Atlet */}
           <div className="bg-slate-50 p-6 border-t border-slate-100 flex flex-col gap-3">
             <div className="flex items-center gap-3 text-sm">
               <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 flex-shrink-0">
@@ -414,7 +453,7 @@ export default function Profile() {
                 <h3 className="text-base font-bold tracking-tight text-slate-800">Pengaturan Akun</h3>
               </div>
               <button 
-                onClick={() => setIsEditModalOpen(false)} 
+                onClick={() => setIsEditModalOpen(false)}
                 className="p-2 bg-white rounded-full text-slate-400 hover:bg-rose-50 hover:text-rose-500 shadow-sm border border-slate-100 transition-all"
               >
                 <X size={18} />
@@ -426,25 +465,27 @@ export default function Profile() {
                 
                 <div className="grid grid-cols-2 gap-3 p-4 bg-slate-50 rounded-2xl border border-slate-100">
                   <div className="col-span-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">NIS (Hanya Baca)</label>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">NIS</label>
                     <input disabled value={studentData.nis} className="w-full bg-transparent text-sm font-bold text-slate-600 outline-none" />
                   </div>
                   <div className="col-span-2">
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Daftar Status Kelas</label>
                     <div className="flex flex-wrap gap-1.5 mt-1">
                       {allEnrollments.length > 0 ? (
-                        allEnrollments.map((ac, idx) => (
-                          <span
-                            key={idx}
-                            className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                              ac.status === "active"
-                                ? "bg-blue-100 text-blue-700"
-                                : "bg-slate-200 text-slate-500 line-through"
-                            }`}
-                          >
-                            {ac.classes?.name} {ac.status === "active" ? "(Aktif)" : "(Selesai)"}
-                          </span>
-                        ))
+                        [...allEnrollments]
+                          .sort((a, b) => (a.status === "active" ? -1 : 1))
+                          .map((ac, idx) => (
+                            <span
+                              key={ac.id || idx}
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                                ac.status === "active"
+                                  ? "bg-blue-100 text-blue-700"
+                                  : "bg-slate-200 text-slate-500"
+                              }`}
+                            >
+                              {ac.classes?.name} {ac.status === "active" ? "(Aktif)" : "(Selesai)"}
+                            </span>
+                          ))
                       ) : (
                         <span className="text-[10px] font-bold text-slate-400">Belum ada kelas</span>
                       )}
@@ -456,7 +497,6 @@ export default function Profile() {
                   <h4 className="text-xs font-bold text-blue-600 uppercase tracking-wider flex items-center gap-1.5 mb-2">
                     <ShieldCheck size={16} /> Akun Login
                   </h4>
-
                   <div className="space-y-1.5">
                     <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider ml-1">Alamat Email</label>
                     <div className="relative">
@@ -464,12 +504,20 @@ export default function Profile() {
                       <input required type="email" value={editForm.email} onChange={e => setEditForm({...editForm, email: e.target.value})} className="w-full pl-9 pr-4 py-3 text-sm bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all shadow-sm" />
                     </div>
                   </div>
-
                   <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider ml-1">Kata Sandi</label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider ml-1">Kata Sandi</label>
+                      <span className="text-[10px] text-slate-400 italic">(Kosongkan jika tidak diganti)</span>
+                    </div>
                     <div className="relative">
                       <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                      <input type={showPassword ? "text" : "password"} value={editForm.password} onChange={e => setEditForm({...editForm, password: e.target.value})} placeholder="••••••••" className="w-full pl-9 pr-10 py-3 text-sm bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all shadow-sm font-mono" />
+                      <input 
+                        type={showPassword ? "text" : "password"} 
+                        value={editForm.password} 
+                        onChange={e => setEditForm({...editForm, password: e.target.value})} 
+                        placeholder="Masukkan kata sandi baru..." 
+                        className="w-full pl-9 pr-10 py-3 text-sm bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all shadow-sm font-mono" 
+                      />
                       <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-blue-600 transition-colors">
                         {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                       </button>
@@ -481,12 +529,10 @@ export default function Profile() {
                   <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5 mb-2 ml-1">
                     <User size={16} /> Informasi Pribadi
                   </h4>
-
                   <div className="space-y-1.5">
                     <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider ml-1">Nama Lengkap</label>
                     <input required value={editForm.full_name} onChange={e => setEditForm({...editForm, full_name: e.target.value})} className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all shadow-sm font-medium" />
                   </div>
-
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5">
                       <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider ml-1">Orang Tua / Wali</label>
@@ -497,12 +543,10 @@ export default function Profile() {
                       <input type="number" required value={editForm.age} onChange={e => setEditForm({...editForm, age: e.target.value})} className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all shadow-sm font-medium" />
                     </div>
                   </div>
-
                   <div className="space-y-1.5">
                     <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider ml-1">Nomor Telepon</label>
                     <input required placeholder="+62..." value={editForm.phone_number} onChange={e => setEditForm({...editForm, phone_number: e.target.value})} className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all shadow-sm font-medium" />
                   </div>
-
                   <div className="space-y-1.5">
                     <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider ml-1">Alamat Lengkap</label>
                     <textarea required rows="3" value={editForm.address} onChange={e => setEditForm({...editForm, address: e.target.value})} className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all shadow-sm resize-none font-medium"></textarea>
@@ -514,7 +558,7 @@ export default function Profile() {
             <div className="p-4 border-t border-slate-100 bg-white sticky bottom-0 z-10 flex gap-3">
               <button 
                 type="button" 
-                onClick={() => setIsEditModalOpen(false)} 
+                onClick={() => setIsEditModalOpen(false)}
                 className="flex-1 py-3 font-bold text-slate-500 hover:bg-slate-50 rounded-xl transition-colors text-xs sm:text-sm"
               >
                 Batal

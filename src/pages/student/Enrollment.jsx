@@ -11,9 +11,11 @@ import {
   CreditCard,
   FileText,
   Trash2,
-  Users,
   Copy,
   Building2,
+  CheckSquare,
+  Square,
+  Layers,
 } from "lucide-react";
 
 export default function Enrollment() {
@@ -22,12 +24,11 @@ export default function Enrollment() {
   const [studentId, setStudentId] = useState(null);
   const [classes, setClasses] = useState([]);
   const [payments, setPayments] = useState([]);
-  const [selectedClassId, setSelectedClassId] = useState("");
+  const [selectedClassIds, setSelectedClassIds] = useState([]);
   const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
   const fileInputRef = useRef(null);
 
-  // Informasi Rekening Pembayaran Resmi
   const BANK_INFO = {
     bank: "BCA",
     accountNumber: "7112175957",
@@ -41,12 +42,13 @@ export default function Enrollment() {
       if (!savedUser) throw new Error("Sesi berakhir. Silakan masuk kembali.");
       const user = JSON.parse(savedUser);
 
-      // 1. Dapatkan student_id
+      // 1. Ambil student_id
       const { data: student, error: studentError } = await supabase
         .from("students")
         .select("id")
         .eq("user_id", user.id)
         .single();
+
       if (studentError || !student) throw new Error("Data atlet tidak ditemukan.");
       setStudentId(student.id);
 
@@ -55,32 +57,38 @@ export default function Enrollment() {
         .from("payments")
         .select(`
           id, class_id, amount, status, reject_reason, created_at, receipt_url,
-          classes ( name )
+          classes ( name, category )
         `)
         .eq("student_id", student.id)
         .order("created_at", { ascending: false });
+
       if (payError) throw payError;
       setPayments(paymentData || []);
 
-      // 3. Ambil pendaftaran kelas yang saat ini SEDANG AKTIF
+      // 3. Ambil pendaftaran kelas yang sedang AKTIF (status = 'active')
       const { data: activeEnrollments } = await supabase
         .from("student_enrollments")
         .select("class_id")
         .eq("student_id", student.id)
         .eq("status", "active");
+
       const activeClassIds = activeEnrollments?.map((e) => e.class_id) || [];
 
-      // Kecualikan kelas yang pembayarannya masih menunggu verifikasi admin
+      // Ambil kelas yang pembayarannya masih PENDING agar tidak dibayar ganda
       const pendingPayIds = paymentData
         ?.filter((p) => p.status === "pending")
         .map((p) => p.class_id) || [];
-      const excludedClassIds = [...activeClassIds, ...pendingPayIds];
 
-      // 4. Ambil data seluruh kelas dan hitung sisa kuota kapasitas
+      // P2 & P3: Kelas yang sedang aktif atau menunggu konfirmasi dikecualikan.
+      // Kelas yang statusnya 'completed' tetap bisa didaftarkan ulang.
+      const excludedClassIds = [...new Set([...activeClassIds, ...pendingPayIds])];
+
+      // 4. Ambil data kelas dan hitung sisa kapasitas kuota aktif
       const [classRes, allEnrollRes] = await Promise.all([
-        supabase.from("classes").select("id, name, price, max_capacity, max_sessions"),
+        supabase.from("classes").select("id, name, category, price, max_capacity, max_sessions"),
         supabase.from("student_enrollments").select("class_id").eq("status", "active"),
       ]);
+
       if (classRes.error) throw classRes.error;
       if (allEnrollRes.error) throw allEnrollRes.error;
 
@@ -103,6 +111,7 @@ export default function Enrollment() {
             is_full: remainingSeats <= 0,
           };
         });
+
       setClasses(availableClasses);
     } catch (error) {
       toast.error(error.message);
@@ -115,18 +124,29 @@ export default function Enrollment() {
     loadData();
   }, []);
 
-  const selectedClassDetails = classes.find((c) => c.id === selectedClassId);
-
   const handleCopyAccount = () => {
     navigator.clipboard.writeText(BANK_INFO.accountNumber);
     toast.success("Nomor rekening BCA berhasil disalin!");
   };
 
+  const handleToggleClass = (classItem) => {
+    if (classItem.is_full) return;
+    setSelectedClassIds((prev) => {
+      if (prev.includes(classItem.id)) {
+        return prev.filter((id) => id !== classItem.id);
+      } else {
+        return [...prev, classItem.id];
+      }
+    });
+  };
+
+  const selectedClasses = classes.filter((c) => selectedClassIds.includes(c.id));
+  const totalAmount = selectedClasses.reduce((sum, item) => sum + (Number(item.price) || 0), 0);
+
   const handleFileChange = (e) => {
     const selectedFile = e.target.files[0];
     if (!selectedFile) return;
 
-    // Batas file dinaikkan menjadi 4MB (4 * 1024 * 1024 bytes)
     if (selectedFile.size > 4 * 1024 * 1024) {
       toast.error("Ukuran file tidak boleh melebihi 4MB.");
       fileInputRef.current.value = "";
@@ -152,50 +172,57 @@ export default function Enrollment() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!selectedClassId) return toast.error("Silakan pilih kelas terlebih dahulu.");
-    if (selectedClassDetails?.is_full) return toast.error("Kelas ini sudah penuh, silakan pilih kelas lain.");
-    if (!file) return toast.error("Silakan unggah bukti transfer pembayaran.");
+    if (selectedClassIds.length === 0) {
+      return toast.error("Silakan pilih minimal 1 kelas yang ingin diikuti.");
+    }
+    if (!file) {
+      return toast.error("Silakan unggah bukti transfer pembayaran.");
+    }
 
     setSubmitting(true);
-    const loadingToast = toast.loading("Mengunggah data pembayaran...");
+    const loadingToast = toast.loading(`Mengunggah pembayaran untuk ${selectedClassIds.length} kelas...`);
 
+    let uploadedReceiptPath = null;
     try {
       const fileExt = file.name.split(".").pop();
       const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
-      const filePath = `receipts/${fileName}`;
+      uploadedReceiptPath = `receipts/${fileName}`;
 
+      // Unggah bukti transfer ke Supabase Storage bucket 'images'
       const { error: uploadError } = await supabase.storage
         .from("images")
-        .upload(filePath, file);
+        .upload(uploadedReceiptPath, file);
 
-      if (uploadError) throw new Error("Gagal mengunggah gambar bukti transfer: " + uploadError.message);
+      if (uploadError) throw new Error("Gagal mengunggah bukti: " + uploadError.message);
 
-      const { data: urlData } = supabase.storage
-        .from("images")
-        .getPublicUrl(filePath);
-
+      const { data: urlData } = supabase.storage.from("images").getPublicUrl(uploadedReceiptPath);
       const receiptUrl = urlData.publicUrl;
 
-      const { error: insertError } = await supabase.from("payments").insert([
-        {
-          student_id: studentId,
-          class_id: selectedClassId,
-          amount: selectedClassDetails.price,
-          receipt_url: receiptUrl,
-          status: "pending",
-        },
-      ]);
+      // Batch insert transaksi pembayaran untuk semua kelas terpilih
+      const paymentBatch = selectedClasses.map((c) => ({
+        student_id: studentId,
+        class_id: c.id,
+        amount: c.price,
+        receipt_url: receiptUrl,
+        status: "pending",
+      }));
 
+      const { error: insertError } = await supabase.from("payments").insert(paymentBatch);
       if (insertError) throw insertError;
 
-      toast.success("Bukti pembayaran berhasil dikirim! Menunggu verifikasi admin.", {
-        id: loadingToast,
-      });
+      toast.success(
+        `Pengajuan untuk ${selectedClassIds.length} kelas berhasil! Menunggu verifikasi admin.`,
+        { id: loadingToast }
+      );
 
-      setSelectedClassId("");
+      setSelectedClassIds([]);
       clearFile();
       loadData();
     } catch (error) {
+      // Rollback file bukti jika insert database gagal (P4)
+      if (uploadedReceiptPath) {
+        await supabase.storage.from("images").remove([uploadedReceiptPath]);
+      }
       toast.error(error.message, { id: loadingToast });
     } finally {
       setSubmitting(false);
@@ -207,7 +234,7 @@ export default function Enrollment() {
       style: "currency",
       currency: "IDR",
       minimumFractionDigits: 0,
-    }).format(number);
+    }).format(Number(number) || 0);
   };
 
   const getStatusBadge = (status) => {
@@ -244,20 +271,20 @@ export default function Enrollment() {
   return (
     <div className="min-h-screen bg-[#f8fafc] p-4 md:p-8 font-sans">
       <Toaster position="top-right" />
+
       <div className="max-w-7xl mx-auto mb-6">
         <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight flex items-center gap-3">
           <CreditCard className="text-blue-600" size={28} />
           Pendaftaran Kelas
         </h1>
         <p className="text-slate-500 mt-1 text-sm">
-          Pilih kelas latihan baru atau perpanjang paket latihan yang telah selesai.
+          Pilih satu atau beberapa kelas latihan renang dan kirim konfirmasi transfer sekaligus.
         </p>
       </div>
 
       <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Kolom Kiri: Formulir & Rekening */}
+        {/* Kolom Kiri: Info Bank & Form Pendaftaran */}
         <div className="lg:col-span-1 space-y-4">
-          {/* Kartu Informasi Rekening Tujuan Transfer */}
           <div className="bg-gradient-to-br from-blue-700 via-blue-800 to-[#0a192f] rounded-3xl p-5 text-white shadow-xl shadow-blue-900/10 relative overflow-hidden border border-blue-600/30">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
@@ -297,65 +324,95 @@ export default function Enrollment() {
             </div>
           </div>
 
-          {/* Formulir Pendaftaran */}
           <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
-            <h2 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-4 flex items-center gap-2">
-              <BookOpen size={16} className="text-blue-600" /> Formulir Pendaftaran
+            <h2 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-4 flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <BookOpen size={16} className="text-blue-600" /> Pilih Kelas Latihan
+              </span>
+              <span className="text-[10px] font-bold px-2 py-0.5 bg-blue-50 text-blue-600 rounded-full">
+                {selectedClassIds.length} Dipilih
+              </span>
             </h2>
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">
-                  Pilihan Kelas
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2">
+                  Daftar Kelas Tersedia
                 </label>
-                <select
-                  value={selectedClassId}
-                  onChange={(e) => setSelectedClassId(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl text-xs sm:text-sm font-medium text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
-                >
-                  <option value="">-- Pilih Kelas --</option>
+                <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
                   {classes.map((c) => {
+                    const isSelected = selectedClassIds.includes(c.id);
                     const sisa = c.remaining_seats ?? 0;
+
                     return (
-                      <option key={c.id} value={c.id} disabled={c.is_full}>
-                        {c.name} {c.is_full ? "(Penuh)" : `(Sisa Kuota: ${sisa})`}
-                      </option>
+                      <div
+                        key={c.id}
+                        onClick={() => handleToggleClass(c)}
+                        className={`p-3 rounded-2xl border-2 transition-all cursor-pointer select-none ${
+                          c.is_full
+                            ? "opacity-50 border-slate-200 bg-slate-50 cursor-not-allowed"
+                            : isSelected
+                            ? "border-blue-600 bg-blue-50/70 ring-1 ring-blue-600"
+                            : "border-slate-100 bg-slate-50/50 hover:bg-slate-50 hover:border-slate-200"
+                        }`}
+                      >
+                        <div className="flex items-start gap-2.5">
+                          <div className="mt-0.5 shrink-0">
+                            {isSelected ? (
+                              <CheckSquare size={16} className="text-blue-600" />
+                            ) : (
+                              <Square size={16} className="text-slate-400" />
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-1">
+                              <h4 className="font-bold text-slate-800 text-xs truncate">{c.name}</h4>
+                              <span className="text-[10px] font-black text-blue-700 shrink-0">
+                                {formatRupiah(c.price)}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between text-[10px] text-slate-400 mt-1">
+                              <span className="uppercase font-semibold">{c.category || "Umum"}</span>
+                              <span>
+                                {c.is_full ? "Penuh" : `Sisa ${sisa} Kuota`}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                     );
                   })}
-                </select>
-                {classes.length === 0 && (
-                  <p className="text-xs text-amber-600 mt-2 font-medium">
-                    Semua kelas yang tersedia saat ini sedang aktif Anda ikuti atau masih menunggu verifikasi.
-                  </p>
-                )}
+
+                  {classes.length === 0 && (
+                    <div className="p-4 bg-amber-50 rounded-2xl border border-amber-200 text-center">
+                      <p className="text-xs text-amber-700 font-medium">
+                        Semua kelas yang tersedia saat ini sedang aktif Anda ikuti atau menunggu verifikasi.
+                      </p>
+                    </div>
+                  )}
+                </div>
               </div>
 
-              {selectedClassDetails && (
-                <div className="p-4 bg-blue-50/60 rounded-xl border border-blue-100 space-y-2.5 text-xs">
-                  <div className="flex justify-between items-center">
-                    <span className="font-semibold text-slate-600">Biaya:</span>
-                    <span className="font-bold text-blue-700 text-sm">{formatRupiah(selectedClassDetails.price)}</span>
-                  </div>
-                  <div className="flex justify-between items-center pt-2 border-t border-blue-100">
-                    <span className="font-semibold text-slate-600">Target Pertemuan:</span>
-                    <span className="font-bold text-slate-700">{selectedClassDetails.max_sessions ?? 12} Sesi</span>
-                  </div>
-                  <div className="flex justify-between items-center pt-2 border-t border-blue-100">
-                    <span className="font-semibold text-slate-600 flex items-center gap-1.5">
-                      <Users size={14} className="text-indigo-500" /> Sisa Kuota Kelas:
+              {selectedClasses.length > 0 && (
+                <div className="p-4 bg-slate-900 rounded-2xl text-white space-y-2.5 text-xs shadow-md">
+                  <div className="flex items-center justify-between text-[11px] text-slate-300 font-medium">
+                    <span className="flex items-center gap-1.5">
+                      <Layers size={13} className="text-cyan-400" /> Kelas yang Dipilih:
                     </span>
-                    <span
-                      className={`font-black px-2 py-0.5 rounded-full text-[11px] ${
-                        (selectedClassDetails.remaining_seats ?? 0) <= 0
-                          ? "bg-rose-100 text-rose-700 border border-rose-200"
-                          : (selectedClassDetails.remaining_seats ?? 0) <= 3
-                          ? "bg-amber-100 text-amber-800 border border-amber-200"
-                          : "bg-emerald-100 text-emerald-800 border border-emerald-200"
-                      }`}
-                    >
-                      {(selectedClassDetails.remaining_seats ?? 0) <= 0
-                        ? "Penuh"
-                        : `${selectedClassDetails.remaining_seats ?? 0} Kursi (${selectedClassDetails.enrolled_count ?? 0}/${selectedClassDetails.max_capacity ?? 0})`}
+                    <span className="font-bold text-white">{selectedClasses.length} Kelas</span>
+                  </div>
+                  <div className="space-y-1 py-1 border-t border-slate-800">
+                    {selectedClasses.map((item) => (
+                      <div key={item.id} className="flex justify-between text-[11px] text-slate-300">
+                        <span className="truncate pr-2">• {item.name}</span>
+                        <span className="font-mono">{formatRupiah(item.price)}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex justify-between items-center pt-2 border-t border-slate-700">
+                    <span className="font-bold text-cyan-300">Total Pembayaran:</span>
+                    <span className="font-black text-white text-base tracking-wide font-mono">
+                      {formatRupiah(totalAmount)}
                     </span>
                   </div>
                 </div>
@@ -368,7 +425,7 @@ export default function Enrollment() {
                 {!previewUrl ? (
                   <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-slate-200 bg-slate-50 rounded-xl hover:bg-slate-100 cursor-pointer transition-colors">
                     <UploadCloud size={24} className="text-slate-400 mb-2" />
-                    <p className="text-xs text-slate-600 font-medium">Klik untuk memilih file</p>
+                    <p className="text-xs text-slate-600 font-medium">Klik untuk memilih file bukti</p>
                     <p className="text-[10px] text-slate-400 mt-0.5">JPG, PNG, atau WebP (Maksimal 4MB)</p>
                     <input
                       type="file"
@@ -385,6 +442,7 @@ export default function Enrollment() {
                       type="button"
                       onClick={clearFile}
                       className="absolute top-2 right-2 p-1.5 bg-rose-600 text-white rounded-full shadow-md hover:bg-rose-700 transition-colors"
+                      title="Hapus gambar"
                     >
                       <Trash2 size={16} />
                     </button>
@@ -394,10 +452,17 @@ export default function Enrollment() {
 
               <button
                 type="submit"
-                disabled={submitting || !selectedClassId || selectedClassDetails?.is_full || !file}
-                className="w-full py-3 bg-slate-900 hover:bg-black text-white font-bold rounded-xl shadow-md transition-all text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
+                disabled={submitting || selectedClassIds.length === 0 || !file}
+                className="w-full py-3 bg-slate-900 hover:bg-black text-white font-bold rounded-xl shadow-md transition-all text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 flex items-center justify-center gap-2"
               >
-                {submitting ? "Mengirim..." : selectedClassDetails?.is_full ? "Kelas Penuh" : "Kirim Pembayaran"}
+                {submitting ? (
+                  "Mengirim Pembayaran..."
+                ) : (
+                  <>
+                    <CreditCard size={16} />
+                    Kirim Pembayaran ({selectedClassIds.length} Kelas)
+                  </>
+                )}
               </button>
             </form>
           </div>
@@ -418,7 +483,12 @@ export default function Enrollment() {
             <div className="space-y-3">
               {payments.map((p) => {
                 const dateObj = new Date(p.created_at);
-                const dateStr = dateObj.toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
+                const dateStr = dateObj.toLocaleDateString("id-ID", {
+                  day: "numeric",
+                  month: "long",
+                  year: "numeric",
+                });
+
                 return (
                   <div key={p.id} className="border border-slate-100 rounded-2xl p-4 bg-slate-50/50 space-y-3">
                     <div className="flex justify-between items-start">
@@ -441,6 +511,7 @@ export default function Enrollment() {
                       >
                         <ImageIcon size={14} /> Lihat Bukti Transfer
                       </a>
+
                       {p.status === "rejected" && p.reject_reason && (
                         <span className="text-rose-600 font-medium text-[11px]">
                           Alasan: {p.reject_reason}
@@ -454,7 +525,7 @@ export default function Enrollment() {
               {payments.length === 0 && (
                 <div className="text-center py-12 text-slate-400">
                   <p className="text-sm font-bold text-slate-600">Belum ada riwayat pembayaran</p>
-                  <p className="text-xs mt-1">Daftar ke salah satu kelas untuk memulai latihan.</p>
+                  <p className="text-xs mt-1">Pilih satu atau beberapa kelas untuk memulai pendaftaran.</p>
                 </div>
               )}
             </div>

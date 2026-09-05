@@ -5,17 +5,22 @@ import {
   LayoutTemplate, Save, Plus, Trash2, Edit3, Type, Star, Layers,
   CheckCircle2, X, MinusCircle, Image as ImageIcon,
   Activity, Droplets, Medal, Eye, EyeOff, MapPin,
-  AlertTriangle, Loader2
+  AlertTriangle, Loader2, Tag, Bookmark, Users, CreditCard
 } from "lucide-react";
 
-// Pemetaan Ikon Program Latihan
 const ICON_MAP = { Droplets, Activity, Medal, Star };
-
 const ICON_OPTIONS = [
-  { value: "Droplets", label: "Tetes Air — Pemula" },
-  { value: "Activity", label: "Aktivitas — Menengah" },
-  { value: "Medal",    label: "Medali — Prestasi / Lanjutan" },
-  { value: "Star",     label: "Bintang — Umum / Spesial" },
+  { value: "Droplets", label: "Tetes Air (Pemula)" },
+  { value: "Activity", label: "Aktivitas (Menengah)" },
+  { value: "Medal",    label: "Medali (Prestasi / Lanjutan)" },
+  { value: "Star",     label: "Bintang (Umum / Spesial)" },
+];
+
+const CATEGORY_OPTIONS = [
+  { value: "anak-anak", label: "Anak-anak" },
+  { value: "dewasa", label: "Dewasa" },
+  { value: "profesional", label: "Profesional" },
+  { value: "intensif", label: "Intensif" },
 ];
 
 function CustomConfirmModal({ isOpen, onClose, onConfirm, title, message, confirmLabel = "Hapus", isDestructive = true }) {
@@ -110,58 +115,44 @@ export default function LandingManage() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const [hero, setHero] = useState({
-    id: null,
-    title: "",
-    subtitle: "",
-    action_url: "",
-  });
+  const [hero, setHero] = useState({ id: null, title: "", subtitle: "", action_url: "" });
   const [about, setAbout] = useState({ id: null, title: "", subtitle: "" });
-  const [footerContact, setFooterContact] = useState({
-    id: null,
-    address: "",
-    phone: "",
-    email: "",
-  });
-  const [courses, setCourses] = useState([]);
+  const [footerContact, setFooterContact] = useState({ id: null, address: "", phone: "", email: "" });
+
+  const [classes, setClasses] = useState([]);
+  const [landingCoursesMap, setLandingCoursesMap] = useState({});
   const [testimonials, setTestimonials] = useState([]);
   const [gallery, setGallery] = useState([]);
 
-  // Modal Kursus
-  const [courseModal, setCourseModal] = useState(false);
-  const [courseEditing, setCourseEditing] = useState(null);
-  const [courseForm, setCourseForm] = useState({
-    title: "",
-    price: "",
+  // Modal Kelas
+  const [classModal, setClassModal] = useState(false);
+  const [classEditing, setClassEditing] = useState(null);
+  const [originalName, setOriginalName] = useState("");
+  const [classForm, setClassForm] = useState({
+    name: "",
+    category: "anak-anak",
+    price: 0,
+    max_sessions: 12,
+    max_capacity: 20,
     description: "",
     icon_name: "Droplets",
     features: [""],
   });
-  const [courseSaving, setCourseSaving] = useState(false);
+  const [classSaving, setClassSaving] = useState(false);
 
   // Modal Testimoni
   const [testiModal, setTestiModal] = useState(false);
   const [testiEditing, setTestiEditing] = useState(null);
-  const [testiForm, setTestiForm] = useState({
-    name: "",
-    role: "",
-    text: "",
-    is_published: true,
-  });
+  const [testiForm, setTestiForm] = useState({ name: "", role: "", text: "", is_published: true });
   const [testiSaving, setTestiSaving] = useState(false);
 
   // Modal Galeri
   const [galleryModal, setGalleryModal] = useState(false);
-  const [galleryForm, setGalleryForm] = useState({
-    image_url: "",
-    alt_text: "",
-    sort_order: 0,
-  });
+  const [galleryForm, setGalleryForm] = useState({ image_url: "", alt_text: "", sort_order: 0 });
   const [gallerySaving, setGallerySaving] = useState(false);
   const [galleryUploadMethod, setGalleryUploadMethod] = useState("url");
   const [galleryFile, setGalleryFile] = useState(null);
 
-  // Dialog Konfirmasi Kustom
   const [confirmState, setConfirmState] = useState({
     isOpen: false,
     title: "",
@@ -186,6 +177,44 @@ export default function LandingManage() {
     setConfirmState((prev) => ({ ...prev, isOpen: false, onConfirm: null }));
   };
 
+  // Helper pembersihan Storage (P4)
+  const extractStoragePath = (publicUrl) => {
+    if (!publicUrl) return null;
+    try {
+      const parts = publicUrl.split("/images/");
+      if (parts.length > 1) {
+        return parts[1];
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
+  const deleteImageFileIfOrphan = async (imageUrl, excludeId = null) => {
+    if (!imageUrl) return;
+    const filePath = extractStoragePath(imageUrl);
+    if (!filePath) return;
+
+    try {
+      let query = supabase
+        .from("landing_gallery")
+        .select("id", { count: "exact", head: true })
+        .eq("image_url", imageUrl);
+
+      if (excludeId) {
+        query = query.neq("id", excludeId);
+      }
+
+      const { count } = await query;
+      if (!count || count === 0) {
+        await supabase.storage.from("images").remove([filePath]);
+      }
+    } catch (err) {
+      console.error("Gagal menghapus file galeri dari storage:", err);
+    }
+  };
+
   useEffect(() => {
     fetchAll();
   }, []);
@@ -195,23 +224,18 @@ export default function LandingManage() {
     try {
       const [
         { data: settings },
-        { data: courseData },
+        classRes,
+        enrollRes,
+        landingCourseRes,
         { data: testiData },
         { data: galleryData },
       ] = await Promise.all([
         supabase.from("landing_settings").select("*"),
-        supabase
-          .from("landing_courses")
-          .select("*")
-          .order("created_at", { ascending: true }),
-        supabase
-          .from("landing_testimonials")
-          .select("*")
-          .order("created_at", { ascending: false }),
-        supabase
-          .from("landing_gallery")
-          .select("*")
-          .order("sort_order", { ascending: true }),
+        supabase.from("classes").select("id, name, category, price, max_sessions, max_capacity, created_at").order("created_at", { ascending: true }),
+        supabase.from("student_enrollments").select("class_id").eq("status", "active"), // SINKRONISASI KUOTA (P2): Hanya murid aktif
+        supabase.from("landing_courses").select("id, title, description, features, icon_name"),
+        supabase.from("landing_testimonials").select("*").order("created_at", { ascending: false }),
+        supabase.from("landing_gallery").select("*").order("sort_order", { ascending: true }),
       ]);
 
       if (settings) {
@@ -230,11 +254,31 @@ export default function LandingManage() {
           });
         }
       }
-      if (courseData) setCourses(courseData);
+
+      const lcMap = {};
+      (landingCourseRes.data || []).forEach((lc) => {
+        if (lc.title) lcMap[lc.title.trim().toLowerCase()] = lc;
+      });
+      setLandingCoursesMap(lcMap);
+
+      if (classRes.data) {
+        const countMap = {};
+        (enrollRes.data || []).forEach((item) => {
+          countMap[item.class_id] = (countMap[item.class_id] || 0) + 1;
+        });
+
+        const formatted = classRes.data.map((c) => ({
+          ...c,
+          category: c.category || "anak-anak",
+          enrolled_count: countMap[c.id] || 0,
+        }));
+        setClasses(formatted);
+      }
+
       if (testiData) setTestimonials(testiData);
       if (galleryData) setGallery(galleryData);
     } catch (err) {
-      toast.error("Gagal memuat konten halaman utama: " + err.message);
+      toast.error("Gagal memuat data: " + err.message);
     }
     setLoading(false);
   };
@@ -249,8 +293,9 @@ export default function LandingManage() {
         action_url: hero.action_url,
       })
       .eq("section", "hero");
-    if (error) toast.error("Gagal memperbarui bagian utama (Hero)");
-    else toast.success("Bagian utama (Hero) berhasil diperbarui");
+
+    if (error) toast.error("Gagal memperbarui Hero");
+    else toast.success("Hero berhasil diperbarui");
     setSaving(false);
   };
 
@@ -269,91 +314,208 @@ export default function LandingManage() {
         })
         .eq("section", "footer_contact"),
     ]);
-    if (r1.error || r2.error) toast.error("Gagal menyimpan informasi profil & kontak");
-    else toast.success("Informasi tentang kami dan kontak berhasil disimpan");
+
+    if (r1.error || r2.error) toast.error("Gagal menyimpan profil & kontak");
+    else toast.success("Profil dan kontak berhasil disimpan");
     setSaving(false);
   };
 
-  // Logika Kelola Kursus
-  const openNewCourse = () => {
-    setCourseEditing(null);
-    setCourseForm({
-      title: "",
-      price: "",
+  const openNewClass = () => {
+    setClassEditing(null);
+    setOriginalName("");
+    setClassForm({
+      name: "",
+      category: "anak-anak",
+      price: 0,
+      max_sessions: 12,
+      max_capacity: 20,
       description: "",
       icon_name: "Droplets",
       features: [""],
     });
-    setCourseModal(true);
+    setClassModal(true);
   };
 
-  const openEditCourse = (course) => {
-    setCourseEditing(course.id);
-    setCourseForm({
-      title: course.title || "",
-      price: course.price || "",
-      description: course.description || "",
-      icon_name: course.icon_name || "Droplets",
-      features: course.features?.length ? course.features : [""],
+  const openEditClass = (c) => {
+    setClassEditing(c.id);
+    setOriginalName(c.name || "");
+    const matchedLanding = landingCoursesMap[c.name?.trim().toLowerCase()];
+    setClassForm({
+      name: c.name || "",
+      category: c.category || "anak-anak",
+      price: c.price || 0,
+      max_sessions: c.max_sessions || 12,
+      max_capacity: c.max_capacity || 20,
+      description: matchedLanding?.description || "",
+      icon_name: matchedLanding?.icon_name || "Droplets",
+      features: matchedLanding?.features?.length ? matchedLanding.features : [""],
     });
-    setCourseModal(true);
+    setClassModal(true);
   };
 
-  const saveCourse = async (e) => {
-    e.preventDefault();
-    setCourseSaving(true);
-    const payload = {
-      ...courseForm,
-      features: courseForm.features.filter((f) => f.trim()),
-    };
-    const { error } = courseEditing
-      ? await supabase
-          .from("landing_courses")
-          .update(payload)
-          .eq("id", courseEditing)
-      : await supabase.from("landing_courses").insert([payload]);
-    if (error) toast.error(error.message);
-    else {
-      toast.success(courseEditing ? "Paket kursus diperbarui" : "Paket kursus ditambahkan");
-      setCourseModal(false);
-      fetchAll();
-    }
-    setCourseSaving(false);
-  };
-
-  const deleteCourse = (id, courseTitle) => {
-    triggerConfirm({
-      title: "Hapus Paket Kursus?",
-      message: `Apakah Anda yakin ingin menghapus paket "${courseTitle || "kursus ini"}" dari halaman utama?`,
-      confirmLabel: "Hapus Kursus",
-      isDestructive: true,
-      onConfirm: async () => {
-        closeConfirm();
-        const { error } = await supabase.from("landing_courses").delete().eq("id", id);
-        if (error) toast.error("Gagal menghapus: " + error.message);
-        else {
-          setCourses((prev) => prev.filter((c) => c.id !== id));
-          toast.success("Paket kursus berhasil dihapus");
-        }
-      },
-    });
-  };
-
-  const addFeature = () =>
-    setCourseForm((p) => ({ ...p, features: [...p.features, ""] }));
+  const addFeature = () => setClassForm((p) => ({ ...p, features: [...p.features, ""] }));
   const removeFeature = (i) =>
-    setCourseForm((p) => ({
+    setClassForm((p) => ({
       ...p,
       features: p.features.filter((_, idx) => idx !== i),
     }));
+
   const changeFeature = (i, v) =>
-    setCourseForm((p) => {
+    setClassForm((p) => {
       const f = [...p.features];
       f[i] = v;
       return { ...p, features: f };
     });
 
-  // Logika Kelola Testimoni
+  const saveClass = async (e) => {
+    e.preventDefault();
+    const cleanName = classForm.name.trim();
+    if (!cleanName) {
+      toast.error("Nama kelas tidak boleh kosong.");
+      return;
+    }
+
+    // P3: Validasi duplikasi nama kelas
+    const isDuplicate = classes.some(
+      (c) => c.name.toLowerCase() === cleanName.toLowerCase() && c.id !== classEditing
+    );
+    if (isDuplicate) {
+      toast.error(`Nama kelas "${cleanName}" sudah ada.`);
+      return;
+    }
+
+    setClassSaving(true);
+    const rawPrice = String(classForm.price).replace(/[^0-9]/g, "");
+    const parsedPrice = rawPrice === "" ? 0 : parseFloat(rawPrice);
+
+    const classPayload = {
+      name: cleanName,
+      category: classForm.category,
+      price: isNaN(parsedPrice) ? 0 : parsedPrice,
+      max_sessions: parseInt(classForm.max_sessions, 10) || 12,
+      max_capacity: parseInt(classForm.max_capacity, 10) || 20,
+    };
+
+    try {
+      const { error: classErr } = classEditing
+        ? await supabase.from("classes").update(classPayload).eq("id", classEditing)
+        : await supabase.from("classes").insert([classPayload]);
+
+      if (classErr) throw classErr;
+
+      const cleanFeatures = classForm.features.filter((f) => f.trim());
+      const formatRupiahText = new Intl.NumberFormat("id-ID", {
+        style: "currency",
+        currency: "IDR",
+        minimumFractionDigits: 0,
+      }).format(parsedPrice);
+
+      const landingPayload = {
+        title: cleanName,
+        price: `${formatRupiahText} / Paket`,
+        description: classForm.description.trim(),
+        icon_name: classForm.icon_name,
+        features: cleanFeatures,
+      };
+
+      // P3: Sinkronisasi fleksibel dengan landing_courses
+      const { data: matchedLanding } = await supabase
+        .from("landing_courses")
+        .select("id")
+        .or(`title.ilike.${originalName.trim() || cleanName},title.ilike.${cleanName}`)
+        .limit(1);
+
+      if (matchedLanding && matchedLanding.length > 0) {
+        await supabase
+          .from("landing_courses")
+          .update(landingPayload)
+          .eq("id", matchedLanding[0].id);
+      } else {
+        await supabase
+          .from("landing_courses")
+          .insert([landingPayload]);
+      }
+
+      toast.success(classEditing ? "Kelas dan tampilan landing page berhasil diperbarui" : "Kelas baru berhasil dibuat");
+      setClassModal(false);
+      fetchAll();
+    } catch (err) {
+      toast.error(`Gagal menyimpan: ${err.message}`);
+    } finally {
+      setClassSaving(false);
+    }
+  };
+
+  const deleteClass = (id, className) => {
+    triggerConfirm({
+      title: "Hapus Kelas?",
+      message: `Hapus kelas "${className || "ini"}"? Data terkait di sistem dan halaman utama akan ikut diselaraskan.`,
+      confirmLabel: "Hapus Kelas",
+      isDestructive: true,
+      onConfirm: async () => {
+        closeConfirm();
+        try {
+          // 1. Cek pendaftaran aktif
+          const { count: enrollCount, error: enrollErr } = await supabase
+            .from("student_enrollments")
+            .select("*", { count: "exact", head: true })
+            .eq("class_id", id)
+            .eq("status", "active");
+
+          if (enrollErr) throw enrollErr;
+          if (enrollCount > 0) {
+            toast.error(`Tidak dapat menghapus. Masih ada ${enrollCount} siswa aktif di kelas ini.`);
+            return;
+          }
+
+          // 2. Cek transaksi pembayaran terkait
+          const { count: payCount, error: payErr } = await supabase
+            .from("payments")
+            .select("*", { count: "exact", head: true })
+            .eq("class_id", id);
+
+          if (payErr) throw payErr;
+          if (payCount > 0) {
+            toast.error(`Tidak dapat menghapus. Terdapat ${payCount} catatan pembayaran terkait kelas ini.`);
+            return;
+          }
+
+          // 3. Bersihkan referensi class_id di tabel sessions (P3)
+          const { data: relatedSessions } = await supabase
+            .from("sessions")
+            .select("id, class_ids");
+
+          if (relatedSessions) {
+            for (const s of relatedSessions) {
+              if (Array.isArray(s.class_ids) && s.class_ids.includes(id)) {
+                const updatedClassIds = s.class_ids.filter((cId) => cId !== id);
+                await supabase
+                  .from("sessions")
+                  .update({ class_ids: updatedClassIds })
+                  .eq("id", s.id);
+              }
+            }
+          }
+
+          // 4. Hapus baris kelas
+          const { error } = await supabase.from("classes").delete().eq("id", id);
+          if (error) throw error;
+
+          // 5. Hapus relasi landing_courses
+          if (className) {
+            await supabase.from("landing_courses").delete().ilike("title", className.trim());
+          }
+
+          setClasses((prev) => prev.filter((c) => c.id !== id));
+          toast.success("Kelas berhasil dihapus");
+          fetchAll();
+        } catch (err) {
+          toast.error("Gagal menghapus: " + err.message);
+        }
+      },
+    });
+  };
+
   const openNewTesti = () => {
     setTestiEditing(null);
     setTestiForm({ name: "", role: "", text: "", is_published: true });
@@ -375,14 +537,12 @@ export default function LandingManage() {
     e.preventDefault();
     setTestiSaving(true);
     const { error } = testiEditing
-      ? await supabase
-          .from("landing_testimonials")
-          .update(testiForm)
-          .eq("id", testiEditing)
+      ? await supabase.from("landing_testimonials").update(testiForm).eq("id", testiEditing)
       : await supabase.from("landing_testimonials").insert([testiForm]);
+
     if (error) toast.error(error.message);
     else {
-      toast.success(testiEditing ? "Ulasan berhasil diperbarui" : "Ulasan berhasil ditambahkan");
+      toast.success(testiEditing ? "Ulasan diperbarui" : "Ulasan ditambahkan");
       setTestiModal(false);
       fetchAll();
     }
@@ -398,7 +558,7 @@ export default function LandingManage() {
       onConfirm: async () => {
         closeConfirm();
         const { error } = await supabase.from("landing_testimonials").delete().eq("id", id);
-        if (error) toast.error("Gagal menghapus: " + error.message);
+        if (error) toast.error(error.message);
         else {
           setTestimonials((prev) => prev.filter((t) => t.id !== id));
           toast.success("Ulasan berhasil dihapus");
@@ -412,8 +572,8 @@ export default function LandingManage() {
       .from("landing_testimonials")
       .update({ is_published: !current })
       .eq("id", id);
-    if (error) toast.error(error.message);
-    else {
+
+    if (!error) {
       setTestimonials((prev) =>
         prev.map((t) => (t.id === id ? { ...t, is_published: !current } : t))
       );
@@ -421,7 +581,6 @@ export default function LandingManage() {
     }
   };
 
-  // Logika Kelola Galeri
   const openAddGallery = () => {
     setGalleryForm({ image_url: "", alt_text: "", sort_order: gallery.length });
     setGalleryUploadMethod("file");
@@ -432,7 +591,6 @@ export default function LandingManage() {
   const saveGallery = async (e) => {
     e.preventDefault();
     setGallerySaving(true);
-
     let finalImageUrl = galleryForm.image_url;
 
     if (galleryUploadMethod === "file" && galleryFile) {
@@ -440,17 +598,10 @@ export default function LandingManage() {
         const fileExt = galleryFile.name.split(".").pop();
         const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
         const filePath = `gallery/${fileName}`;
-
-        const { error: uploadError } = await supabase.storage
-          .from("images")
-          .upload(filePath, galleryFile);
-
+        const { error: uploadError } = await supabase.storage.from("images").upload(filePath, galleryFile);
         if (uploadError) throw uploadError;
 
-        const { data: urlData } = supabase.storage
-          .from("images")
-          .getPublicUrl(filePath);
-
+        const { data: urlData } = supabase.storage.from("images").getPublicUrl(filePath);
         finalImageUrl = urlData.publicUrl;
       } catch (err) {
         toast.error("Gagal mengunggah gambar: " + err.message);
@@ -480,7 +631,7 @@ export default function LandingManage() {
     setGallerySaving(false);
   };
 
-  const deleteGallery = (id) => {
+  const deleteGallery = (item) => {
     triggerConfirm({
       title: "Hapus Foto Galeri?",
       message: "Apakah Anda yakin ingin menghapus gambar ini dari etalase galeri publik?",
@@ -488,20 +639,47 @@ export default function LandingManage() {
       isDestructive: true,
       onConfirm: async () => {
         closeConfirm();
-        const { error } = await supabase.from("landing_gallery").delete().eq("id", id);
-        if (error) toast.error(error.message);
-        else {
-          setGallery((prev) => prev.filter((g) => g.id !== id));
-          toast.success("Gambar berhasil dihapus dari galeri");
+        const { error } = await supabase.from("landing_gallery").delete().eq("id", item.id);
+        if (error) {
+          toast.error(error.message);
+        } else {
+          // P4: Bersihkan berkas fisik dari bucket images jika tidak digunakan baris lain
+          await deleteImageFileIfOrphan(item.image_url, item.id);
+
+          setGallery((prev) => prev.filter((g) => g.id !== item.id));
+          toast.success("Gambar dan berkas terkait berhasil dihapus");
         }
       },
     });
   };
 
+  const formatRupiah = (number) => {
+    return new Intl.NumberFormat("id-ID", {
+      style: "currency",
+      currency: "IDR",
+      minimumFractionDigits: 0,
+    }).format(Number(number) || 0);
+  };
+
+  const getCategoryBadge = (cat) => {
+    switch (cat) {
+      case "anak-anak":
+        return "bg-cyan-50 text-cyan-700 border-cyan-200";
+      case "dewasa":
+        return "bg-blue-50 text-blue-700 border-blue-200";
+      case "profesional":
+        return "bg-purple-50 text-purple-700 border-purple-200";
+      case "intensif":
+        return "bg-amber-50 text-amber-700 border-amber-200";
+      default:
+        return "bg-slate-50 text-slate-700 border-slate-200";
+    }
+  };
+
   const TABS = [
     { id: "hero", label: "Bagian Utama (Hero)", icon: Type },
     { id: "info", label: "Informasi & Galeri", icon: ImageIcon },
-    { id: "courses", label: "Paket Program", icon: Layers },
+    { id: "courses", label: "Paket Program (Tabel Kelas)", icon: Layers },
     { id: "testimonials", label: "Ulasan / Testimoni", icon: Star },
   ];
 
@@ -529,7 +707,7 @@ export default function LandingManage() {
               Manajer Halaman Depan
             </h1>
             <p className="text-[11px] text-slate-400 mt-0.5 truncate">
-              Kelola teks, galeri foto, paket renang, dan ulasan publik
+              Kelola banner utama, galeri foto, sinkronisasi kelas, dan ulasan publik
             </p>
           </div>
           {loading && (
@@ -561,7 +739,6 @@ export default function LandingManage() {
       </div>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 md:py-8">
-        {/* Tab Bagian Utama */}
         {activeTab === "hero" && (
           <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
             <div className="lg:col-span-3 bg-white rounded-3xl border border-slate-200 p-6 space-y-4 shadow-sm">
@@ -627,7 +804,6 @@ export default function LandingManage() {
           </div>
         )}
 
-        {/* Tab Informasi & Galeri */}
         {activeTab === "info" && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="space-y-6">
@@ -734,7 +910,7 @@ export default function LandingManage() {
                           </p>
                         )}
                         <button
-                          onClick={() => deleteGallery(img.id)}
+                          onClick={() => deleteGallery(img)}
                           className="p-2 bg-rose-600 text-white rounded-full hover:bg-rose-700 shadow-md active:scale-95"
                           title="Hapus foto"
                         >
@@ -755,70 +931,77 @@ export default function LandingManage() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
               <div>
                 <h2 className="text-base font-bold text-slate-800">
-                  Daftar Program Latihan
+                  Daftar Kelas Latihan (Tabel classes)
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Menampilkan {courses.length} paket latihan pada halaman arahan
+                  Terhubung langsung dengan tabel kelas sistem. Rincian deskripsi naratif dan fasilitas tersimpan ke landing_courses.
                 </p>
               </div>
-              <Btn variant="blue" onClick={openNewCourse}>
-                <Plus size={16} /> Buat Paket Baru
+              <Btn variant="blue" onClick={openNewClass}>
+                <Plus size={16} /> Buat Kelas Baru
               </Btn>
             </div>
 
-            {courses.length === 0 ? (
+            {classes.length === 0 ? (
               <div className="bg-white rounded-3xl border border-slate-200 p-8 shadow-sm">
                 <EmptyState
                   icon={Layers}
-                  message="Belum ada paket program latihan. Tambahkan paket pertama Anda."
+                  message="Belum ada kelas yang terdaftar di sistem. Tambahkan kelas pertama Anda."
                 />
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-                {courses.map((course) => {
-                  const Icon = ICON_MAP[course.icon_name] || Star;
+                {classes.map((cls) => {
+                  const matchedLanding = landingCoursesMap[cls.name?.trim().toLowerCase()];
                   return (
                     <div
-                      key={course.id}
+                      key={cls.id}
                       className="bg-white rounded-2xl border border-slate-200 p-5 flex flex-col shadow-sm hover:shadow-md transition-shadow"
                     >
                       <div className="flex items-start justify-between mb-3">
                         <div className="w-10 h-10 flex items-center justify-center bg-blue-50 rounded-xl text-blue-600">
-                          <Icon size={20} />
+                          <Layers size={20} />
                         </div>
                         <button
-                          onClick={() => deleteCourse(course.id, course.title)}
+                          onClick={() => deleteClass(cls.id, cls.name)}
                           className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                          title="Hapus paket"
+                          title="Hapus kelas"
                         >
                           <Trash2 size={16} />
                         </button>
                       </div>
-                      <h3 className="font-bold text-slate-800 text-sm mb-1">
-                        {course.title}
-                      </h3>
-                      <p className="text-blue-600 font-bold text-xs mb-2">
-                        {course.price}
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <h3 className="font-bold text-slate-800 text-sm">
+                          {cls.name}
+                        </h3>
+                        <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border ${getCategoryBadge(cls.category)}`}>
+                          <Tag size={10} />
+                          {CATEGORY_OPTIONS.find((opt) => opt.value === cls.category)?.label || cls.category}
+                        </span>
+                      </div>
+                      <p className="text-emerald-600 font-bold text-sm mb-2 flex items-center gap-1">
+                        <CreditCard size={14} />
+                        {formatRupiah(cls.price)}
                       </p>
-                      <p className="text-xs text-slate-500 mb-4 line-clamp-2 flex-1">
-                        {course.description}
+                      <p className="text-xs text-slate-500 mb-3 line-clamp-2 italic">
+                        {matchedLanding?.description || "Belum ada deskripsi naratif untuk halaman depan."}
                       </p>
-                      {course.features?.length > 0 && (
-                        <ul className="mb-5 space-y-1.5 border-t border-slate-100 pt-3">
-                          {course.features.slice(0, 3).map((f, i) => (
-                            <li key={i} className="flex items-center gap-1.5 text-xs text-slate-600">
-                              <CheckCircle2 size={13} className="text-emerald-500 flex-shrink-0" />
-                              <span className="truncate">{f}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
+                      <div className="space-y-1.5 border-t border-slate-100 pt-3 text-xs text-slate-600 mb-5 flex-1">
+                        <div className="flex items-center gap-2">
+                          <Bookmark size={13} className="text-blue-500" />
+                          <span>Maksimum <b>{cls.max_sessions} Pertemuan</b></span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Users size={13} className="text-indigo-500" />
+                          <span>Kapasitas: <b>{cls.enrolled_count || 0}/{cls.max_capacity} Siswa Aktif</b></span>
+                        </div>
+                      </div>
                       <Btn
                         variant="outline"
-                        onClick={() => openEditCourse(course)}
+                        onClick={() => openEditClass(cls)}
                         className="w-full mt-auto"
                       >
-                        <Edit3 size={13} /> Ubah Rincian
+                        <Edit3 size={13} /> Ubah Rincian & Deskripsi
                       </Btn>
                     </div>
                   );
@@ -828,7 +1011,6 @@ export default function LandingManage() {
           </div>
         )}
 
-        {/* Tab Ulasan Testimoni */}
         {activeTab === "testimonials" && (
           <div>
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
@@ -870,7 +1052,6 @@ export default function LandingManage() {
                           </p>
                         </div>
                       </div>
-
                       <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
                         <button
                           onClick={() => toggleTesti(t.id, t.is_published)}
@@ -907,38 +1088,42 @@ export default function LandingManage() {
         )}
       </main>
 
-      {/* Modal Paket Kursus */}
+      {/* Modal Kelas Sinkron */}
       <Modal
-        open={courseModal}
-        onClose={() => setCourseModal(false)}
-        title={courseEditing ? "Ubah Paket Program" : "Paket Program Baru"}
+        open={classModal}
+        onClose={() => setClassModal(false)}
+        title={classEditing ? "Ubah Data Kelas & Tampilan Landing" : "Tambah Kelas Baru"}
         icon={Layers}
         maxWidth="max-w-xl"
       >
-        <form onSubmit={saveCourse} className="space-y-4">
-          <Field label="Nama Paket Kursus">
+        <form onSubmit={saveClass} className="space-y-4">
+          <Field label="Nama Kelas">
             <input
               required
-              value={courseForm.title}
-              onChange={(e) => setCourseForm({ ...courseForm, title: e.target.value })}
+              value={classForm.name}
+              onChange={(e) => setClassForm({ ...classForm, name: e.target.value })}
               className={inputCls}
-              placeholder="Contoh: Kelas Pemula Anak"
+              placeholder="Contoh: Kelas Pemula Anak (Beginner)"
             />
           </Field>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field label="Label Harga / Periode">
-              <input
-                required
-                value={courseForm.price}
-                onChange={(e) => setCourseForm({ ...courseForm, price: e.target.value })}
-                className={inputCls}
-                placeholder="Contoh: Rp 350.000 / Bulan"
-              />
-            </Field>
-            <Field label="Ikon Penanda">
+            <Field label="Kategori Kelas">
               <select
-                value={courseForm.icon_name}
-                onChange={(e) => setCourseForm({ ...courseForm, icon_name: e.target.value })}
+                value={classForm.category}
+                onChange={(e) => setClassForm({ ...classForm, category: e.target.value })}
+                className={inputCls}
+              >
+                {CATEGORY_OPTIONS.map((cat) => (
+                  <option key={cat.value} value={cat.value}>
+                    {cat.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Ikon Kartu">
+              <select
+                value={classForm.icon_name}
+                onChange={(e) => setClassForm({ ...classForm, icon_name: e.target.value })}
                 className={inputCls}
               >
                 {ICON_OPTIONS.map((o) => (
@@ -949,17 +1134,51 @@ export default function LandingManage() {
               </select>
             </Field>
           </div>
-          <Field label="Deskripsi Singkat">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <Field label="Maksimal Sesi">
+              <input
+                required
+                type="number"
+                min="1"
+                value={classForm.max_sessions}
+                onChange={(e) => setClassForm({ ...classForm, max_sessions: parseInt(e.target.value, 10) || 0 })}
+                className={inputCls}
+                placeholder="12"
+              />
+            </Field>
+            <Field label="Kuota Atlet">
+              <input
+                required
+                type="number"
+                min="1"
+                value={classForm.max_capacity}
+                onChange={(e) => setClassForm({ ...classForm, max_capacity: parseInt(e.target.value, 10) || 0 })}
+                className={inputCls}
+                placeholder="20"
+              />
+            </Field>
+            <Field label="Biaya Kursus (Rp)">
+              <input
+                required
+                type="number"
+                min="0"
+                step="1000"
+                value={classForm.price}
+                onChange={(e) => setClassForm({ ...classForm, price: e.target.value === "" ? 0 : parseFloat(e.target.value) })}
+                className={`${inputCls} font-bold text-emerald-700`}
+                placeholder="350000"
+              />
+            </Field>
+          </div>
+          <Field label="Deskripsi Naratif (Tampil di Landing Page)">
             <textarea
-              required
               rows={2}
-              value={courseForm.description}
-              onChange={(e) => setCourseForm({ ...courseForm, description: e.target.value })}
+              value={classForm.description}
+              onChange={(e) => setClassForm({ ...classForm, description: e.target.value })}
               className={inputCls}
-              placeholder="Tuliskan sasaran dan ringkasan pelatihan..."
+              placeholder="Deskripsi singkat manfaat atau materi yang dipelajari..."
             />
           </Field>
-
           <div className="border-t border-slate-100 pt-3">
             <div className="flex items-center justify-between mb-2">
               <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
@@ -974,7 +1193,7 @@ export default function LandingManage() {
               </button>
             </div>
             <div className="space-y-2">
-              {courseForm.features.map((feature, i) => (
+              {classForm.features.map((feature, i) => (
                 <div key={i} className="flex items-center gap-2">
                   <span className="w-5 h-5 rounded-full bg-slate-100 text-slate-500 text-[10px] font-bold flex items-center justify-center shrink-0">
                     {i + 1}
@@ -983,9 +1202,9 @@ export default function LandingManage() {
                     value={feature}
                     onChange={(e) => changeFeature(i, e.target.value)}
                     className={`${inputCls} flex-1`}
-                    placeholder={`Poin fasilitas ${i + 1}...`}
+                    placeholder={`Fasilitas ${i + 1}...`}
                   />
-                  {courseForm.features.length > 1 && (
+                  {classForm.features.length > 1 && (
                     <button
                       type="button"
                       onClick={() => removeFeature(i)}
@@ -998,13 +1217,12 @@ export default function LandingManage() {
               ))}
             </div>
           </div>
-
           <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
-            <Btn type="button" variant="ghost" onClick={() => setCourseModal(false)}>
+            <Btn type="button" variant="ghost" onClick={() => setClassModal(false)}>
               Batal
             </Btn>
-            <Btn type="submit" variant="blue" loading={courseSaving}>
-              <Save size={14} /> {courseEditing ? "Simpan Perubahan" : "Simpan Paket"}
+            <Btn type="submit" variant="blue" loading={classSaving}>
+              <Save size={14} /> {classEditing ? "Simpan Perubahan" : "Simpan Kelas"}
             </Btn>
           </div>
         </form>
@@ -1055,7 +1273,6 @@ export default function LandingManage() {
             />
             <span className="font-bold text-slate-700">Publikasikan langsung ke halaman depan</span>
           </label>
-
           <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
             <Btn type="button" variant="ghost" onClick={() => setTestiModal(false)}>
               Batal
@@ -1097,7 +1314,6 @@ export default function LandingManage() {
               Tautan URL
             </label>
           </div>
-
           {galleryUploadMethod === "file" ? (
             <Field label="Pilih Gambar dari Perangkat">
               <input
@@ -1119,7 +1335,6 @@ export default function LandingManage() {
               />
             </Field>
           )}
-
           <Field label="Keterangan Foto (Opsional)">
             <input
               value={galleryForm.alt_text}
@@ -1137,7 +1352,6 @@ export default function LandingManage() {
               className={inputCls}
             />
           </Field>
-
           <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
             <Btn type="button" variant="ghost" onClick={() => setGalleryModal(false)}>
               Batal

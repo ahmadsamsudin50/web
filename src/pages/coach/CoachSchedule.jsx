@@ -14,7 +14,6 @@ import {
   Layers,
   Users,
   Power,
-  X,
 } from "lucide-react";
 
 const TABS = [
@@ -52,7 +51,7 @@ export default function CoachSchedule() {
           throw new Error("Data pelatih tidak ditemukan.");
         }
 
-        // 2. Ambil referensi nama kelas dan jumlah pendaftaran aktif
+        // 2. Ambil referensi nama kelas dan jumlah pendaftaran aktif saja
         const [classesRes, enrollmentsRes] = await Promise.all([
           supabase.from("classes").select("id, name"),
           supabase.from("student_enrollments").select("class_id").eq("status", "active"),
@@ -87,6 +86,7 @@ export default function CoachSchedule() {
         setLoading(false);
       }
     };
+
     fetchData();
   }, []);
 
@@ -107,7 +107,8 @@ export default function CoachSchedule() {
     past: sessions.filter((s) => new Date(s.session_date).getTime() < todayStart),
   };
 
-  let processedSessions = [...grouped[activeTab]];
+  let processedSessions = [...(grouped[activeTab] || [])];
+
   if (searchQuery) {
     const q = searchQuery.toLowerCase();
     processedSessions = processedSessions.filter((s) => {
@@ -141,7 +142,7 @@ export default function CoachSchedule() {
     return (
       <div className="min-h-[70vh] flex flex-col items-center justify-center font-sans">
         <div className="w-10 h-10 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-3"></div>
-        <p className="text-slate-500 text-sm font-medium animate-pulse">Memuat jadwal penugasan instruktur...</p>
+        <p className="text-slate-500 text-sm font-medium animate-pulse">Memuat jadwal tugas melatih...</p>
       </div>
     );
   }
@@ -238,7 +239,6 @@ export default function CoachSchedule() {
               const dayName = dateObj.toLocaleDateString("id-ID", { weekday: "long" });
               const dateFull = dateObj.toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
               const timeStr = dateObj.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
-
               const targetClasses = session.class_ids?.map((id) => classesMap[id]).filter(Boolean) || [];
               const totalAthletes = targetClasses.reduce((acc, curr) => acc + curr.athletes, 0);
 
@@ -259,7 +259,6 @@ export default function CoachSchedule() {
                         </div>
                       </div>
                     </div>
-
                     <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border shrink-0 ${
                       session.is_active
                         ? "bg-emerald-500 text-white border-emerald-600 shadow-sm"
@@ -277,10 +276,9 @@ export default function CoachSchedule() {
                         <Layers size={13} className="text-blue-500" /> Kelas Latihan Terkait
                       </span>
                       <span className="text-[11px] font-bold text-slate-600 flex items-center gap-1">
-                        <Users size={12} className="text-indigo-500" /> {totalAthletes} Atlet
+                        <Users size={12} className="text-indigo-500" /> {totalAthletes} Atlet Aktif
                       </span>
                     </div>
-
                     <div className="flex flex-wrap gap-1.5">
                       {targetClasses.length > 0 ? (
                         targetClasses.map((cls, idx) => (
