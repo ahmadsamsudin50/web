@@ -14,6 +14,10 @@ import {
   Square,
   Layers,
   Sparkles,
+  ZoomIn,
+  ZoomOut,
+  RotateCw,
+  RotateCcw,
 } from "lucide-react";
 
 function CustomConfirmModal({
@@ -74,6 +78,10 @@ export default function Payments() {
   const [actionLoading, setActionLoading] = useState(false);
   const [isRejecting, setIsRejecting] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
+
+  // State Viewer Gambar (Zoom & Rotasi)
+  const [imageScale, setImageScale] = useState(1);
+  const [imageRotation, setImageRotation] = useState(0);
 
   const [selectedIds, setSelectedIds] = useState([]);
   const [confirmState, setConfirmState] = useState({
@@ -163,16 +171,36 @@ export default function Payments() {
     fetchPayments();
   }, []);
 
+  // Hitung jumlah item bundle per receipt & student
+  const bundleReceiptMap = useMemo(() => {
+    const map = new Map();
+    payments.forEach((p) => {
+      if (p.receipt_url && p.student_id) {
+        const key = `${p.student_id}_${p.receipt_url}`;
+        map.set(key, (map.get(key) || 0) + 1);
+      }
+    });
+    return map;
+  }, [payments]);
+
   const filteredPayments = useMemo(() => {
     return payments.filter((p) => {
       const studentName = p.students?.users?.full_name?.toLowerCase() || "";
       const className = p.classes?.name?.toLowerCase() || "";
       const query = searchQuery.toLowerCase();
       const matchesSearch = studentName.includes(query) || className.includes(query);
-      const matchesStatus = filterStatus === "all" ? true : p.status === filterStatus;
+
+      let matchesStatus = true;
+      if (filterStatus === "bundling") {
+        const key = `${p.student_id}_${p.receipt_url}`;
+        matchesStatus = (bundleReceiptMap.get(key) || 0) > 1;
+      } else if (filterStatus !== "all") {
+        matchesStatus = p.status === filterStatus;
+      }
+
       return matchesSearch && matchesStatus;
     });
-  }, [payments, searchQuery, filterStatus]);
+  }, [payments, searchQuery, filterStatus, bundleReceiptMap]);
 
   const relatedPayments = useMemo(() => {
     if (!selectedPayment || !selectedPayment.receipt_url) return [];
@@ -187,10 +215,18 @@ export default function Payments() {
     return relatedPayments.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
   }, [relatedPayments]);
 
+  const bundlingCount = useMemo(() => {
+    return payments.filter((p) => {
+      const key = `${p.student_id}_${p.receipt_url}`;
+      return (bundleReceiptMap.get(key) || 0) > 1;
+    }).length;
+  }, [payments, bundleReceiptMap]);
+
   const counts = {
     pending: payments.filter((p) => p.status === "pending").length,
     approved: payments.filter((p) => p.status === "approved").length,
     rejected: payments.filter((p) => p.status === "rejected").length,
+    bundling: bundlingCount,
   };
 
   const toggleSelectOne = (id) => {
@@ -216,12 +252,22 @@ export default function Payments() {
     filteredPayments.length > 0 &&
     filteredPayments.every((p) => selectedIds.includes(p.id));
 
+  const resetImageViewer = () => {
+    setImageScale(1);
+    setImageRotation(0);
+  };
+
   const openReviewModal = (payment) => {
     setSelectedPayment(payment);
     setIsRejecting(false);
     setRejectReason("");
+    resetImageViewer();
     setIsModalOpen(true);
   };
+
+  const handleZoomIn = () => setImageScale((prev) => Math.min(prev + 0.25, 3));
+  const handleZoomOut = () => setImageScale((prev) => Math.max(prev - 0.25, 0.75));
+  const handleRotateRight = () => setImageRotation((prev) => (prev + 90) % 360);
 
   // Helper eksekusi persetujuan atomik (P2 & P3)
   const processApproval = async (paymentItem, adminId) => {
@@ -489,6 +535,33 @@ export default function Payments() {
             </span>
           )}
         </button>
+
+        {/* Filter Cepat Paket Bundling */}
+        <button
+          onClick={() => {
+            setFilterStatus("bundling");
+            setSelectedIds([]);
+          }}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-xs sm:text-sm whitespace-nowrap transition-all ${
+            filterStatus === "bundling"
+              ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/20"
+              : "text-slate-600 hover:bg-slate-50"
+          }`}
+        >
+          <Layers size={16} /> Paket Bundling
+          {counts.bundling > 0 && (
+            <span
+              className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                filterStatus === "bundling"
+                  ? "bg-white/20 text-white"
+                  : "bg-indigo-50 text-indigo-700"
+              }`}
+            >
+              {counts.bundling}
+            </span>
+          )}
+        </button>
+
         <button
           onClick={() => {
             setFilterStatus("approved");
@@ -759,14 +832,75 @@ export default function Payments() {
               </button>
             </div>
 
-            <div className="rounded-2xl overflow-hidden border border-slate-200 bg-slate-50 flex items-center justify-center p-2 min-h-[220px]">
-              <a href={selectedPayment.receipt_url} target="_blank" rel="noopener noreferrer">
-                <img
-                  src={selectedPayment.receipt_url}
-                  alt="Bukti Transfer"
-                  className="max-h-[300px] w-auto object-contain rounded-xl shadow-sm"
-                />
-              </a>
+            {/* Viewer Bukti Transfer dengan Kontrol Zoom & Rotasi */}
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between px-1">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                  Foto Struk Pembayaran
+                </span>
+                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
+                  <button
+                    type="button"
+                    onClick={handleZoomOut}
+                    disabled={imageScale <= 0.75}
+                    className="p-1 text-slate-600 hover:text-blue-600 hover:bg-white rounded-lg transition-all disabled:opacity-30"
+                    title="Perkecil"
+                  >
+                    <ZoomOut size={15} />
+                  </button>
+                  <span className="text-[10px] font-mono font-bold px-1 text-slate-600">
+                    {Math.round(imageScale * 100)}%
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleZoomIn}
+                    disabled={imageScale >= 3}
+                    className="p-1 text-slate-600 hover:text-blue-600 hover:bg-white rounded-lg transition-all disabled:opacity-30"
+                    title="Perbesar"
+                  >
+                    <ZoomIn size={15} />
+                  </button>
+                  <span className="h-3 w-px bg-slate-300 mx-0.5"></span>
+                  <button
+                    type="button"
+                    onClick={handleRotateRight}
+                    className="p-1 text-slate-600 hover:text-blue-600 hover:bg-white rounded-lg transition-all flex items-center gap-0.5"
+                    title="Putar 90 Derajat"
+                  >
+                    <RotateCw size={15} />
+                    <span className="text-[9px] font-bold font-mono">{imageRotation}°</span>
+                  </button>
+                  {(imageScale !== 1 || imageRotation !== 0) && (
+                    <button
+                      type="button"
+                      onClick={resetImageViewer}
+                      className="px-1.5 py-0.5 text-[9px] font-bold text-rose-600 hover:bg-white rounded-lg transition-all"
+                      title="Reset Tampilan"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-2xl overflow-hidden border border-slate-200 bg-slate-900/5 flex items-center justify-center p-3 min-h-[260px] relative select-none">
+                <a
+                  href={selectedPayment.receipt_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center w-full"
+                >
+                  <img
+                    src={selectedPayment.receipt_url}
+                    alt="Bukti Transfer"
+                    style={{
+                      transform: `scale(${imageScale}) rotate(${imageRotation}deg)`,
+                      transition: "transform 0.2s ease-out",
+                    }}
+                    className="max-h-[300px] w-auto object-contain rounded-xl shadow-sm cursor-zoom-in"
+                  />
+                </a>
+              </div>
             </div>
 
             <div className="p-4 bg-slate-50 rounded-2xl space-y-2.5 text-xs">

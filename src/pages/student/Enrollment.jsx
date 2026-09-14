@@ -16,7 +16,61 @@ import {
   CheckSquare,
   Square,
   Layers,
+  AlertTriangle,
 } from "lucide-react";
+
+// Helper kompresi gambar sisi klien menggunakan HTML5 Canvas
+const compressImage = (inputFile) => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.src = URL.createObjectURL(inputFile);
+    img.onload = () => {
+      URL.revokeObjectURL(img.src);
+      const maxWidth = 1600;
+      const maxHeight = 1600;
+      let { width, height } = img;
+
+      if (width > height) {
+        if (width > maxWidth) {
+          height = Math.round((height * maxWidth) / width);
+          width = maxWidth;
+        }
+      } else {
+        if (height > maxHeight) {
+          width = Math.round((width * maxHeight) / height);
+          height = maxHeight;
+        }
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, width, height);
+
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            resolve(inputFile);
+            return;
+          }
+          const compressedFile = new File(
+            [blob],
+            inputFile.name.replace(/\.[^/.]+$/, "") + ".webp",
+            {
+              type: "image/webp",
+              lastModified: Date.now(),
+            }
+          );
+          resolve(compressedFile);
+        },
+        "image/webp",
+        0.82
+      );
+    };
+    img.onerror = (err) => reject(err);
+  });
+};
 
 export default function Enrollment() {
   const [loading, setLoading] = useState(true);
@@ -143,25 +197,38 @@ export default function Enrollment() {
   const selectedClasses = classes.filter((c) => selectedClassIds.includes(c.id));
   const totalAmount = selectedClasses.reduce((sum, item) => sum + (Number(item.price) || 0), 0);
 
-  const handleFileChange = (e) => {
+  const handleFileChange = async (e) => {
     const selectedFile = e.target.files[0];
     if (!selectedFile) return;
-
-    if (selectedFile.size > 4 * 1024 * 1024) {
-      toast.error("Ukuran file tidak boleh melebihi 4MB.");
-      fileInputRef.current.value = "";
-      return;
-    }
 
     const validTypes = ["image/jpeg", "image/png", "image/jpg", "image/webp"];
     if (!validTypes.includes(selectedFile.type)) {
       toast.error("Hanya file JPG, PNG, dan WebP yang diizinkan.");
-      fileInputRef.current.value = "";
+      if (fileInputRef.current) fileInputRef.current.value = "";
       return;
     }
 
-    setFile(selectedFile);
-    setPreviewUrl(URL.createObjectURL(selectedFile));
+    const compressToast = toast.loading("Mengoptimalkan ukuran gambar...");
+    try {
+      const compressed = await compressImage(selectedFile);
+      if (compressed.size > 4 * 1024 * 1024) {
+        toast.error("Ukuran file tetap melebihi 4MB setelah dikompresi.", { id: compressToast });
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        return;
+      }
+      setFile(compressed);
+      setPreviewUrl(URL.createObjectURL(compressed));
+      toast.success("Foto bukti transfer siap diunggah!", { id: compressToast });
+    } catch (err) {
+      if (selectedFile.size > 4 * 1024 * 1024) {
+        toast.error("Ukuran file tidak boleh melebihi 4MB.", { id: compressToast });
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        return;
+      }
+      setFile(selectedFile);
+      setPreviewUrl(URL.createObjectURL(selectedFile));
+      toast.dismiss(compressToast);
+    }
   };
 
   const clearFile = () => {
@@ -343,6 +410,7 @@ export default function Enrollment() {
                   {classes.map((c) => {
                     const isSelected = selectedClassIds.includes(c.id);
                     const sisa = c.remaining_seats ?? 0;
+                    const isUrgentSeat = !c.is_full && sisa <= 3;
 
                     return (
                       <div
@@ -353,6 +421,8 @@ export default function Enrollment() {
                             ? "opacity-50 border-slate-200 bg-slate-50 cursor-not-allowed"
                             : isSelected
                             ? "border-blue-600 bg-blue-50/70 ring-1 ring-blue-600"
+                            : isUrgentSeat
+                            ? "border-amber-300 bg-amber-50/40 hover:border-amber-400"
                             : "border-slate-100 bg-slate-50/50 hover:bg-slate-50 hover:border-slate-200"
                         }`}
                       >
@@ -373,9 +443,20 @@ export default function Enrollment() {
                             </div>
                             <div className="flex items-center justify-between text-[10px] text-slate-400 mt-1">
                               <span className="uppercase font-semibold">{c.category || "Umum"}</span>
-                              <span>
-                                {c.is_full ? "Penuh" : `Sisa ${sisa} Kuota`}
-                              </span>
+
+                              {/* Indikator Kuota Kritis */}
+                              {c.is_full ? (
+                                <span className="font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-md border border-rose-200">
+                                  Penuh
+                                </span>
+                              ) : isUrgentSeat ? (
+                                <span className="font-black text-amber-800 bg-amber-100/80 px-2 py-0.5 rounded-md border border-amber-300 flex items-center gap-1 shadow-2xs">
+                                  <AlertTriangle size={11} className="text-amber-600 shrink-0" />
+                                  Sisa {sisa} Kuota!
+                                </span>
+                              ) : (
+                                <span>Sisa {sisa} Kuota</span>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -426,7 +507,7 @@ export default function Enrollment() {
                   <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-slate-200 bg-slate-50 rounded-xl hover:bg-slate-100 cursor-pointer transition-colors">
                     <UploadCloud size={24} className="text-slate-400 mb-2" />
                     <p className="text-xs text-slate-600 font-medium">Klik untuk memilih file bukti</p>
-                    <p className="text-[10px] text-slate-400 mt-0.5">JPG, PNG, atau WebP (Maksimal 4MB)</p>
+                    <p className="text-[10px] text-slate-400 mt-0.5">JPG, PNG, atau WebP (Otomatis dikompres)</p>
                     <input
                       type="file"
                       className="hidden"
@@ -446,6 +527,11 @@ export default function Enrollment() {
                     >
                       <Trash2 size={16} />
                     </button>
+                    {file && (
+                      <div className="absolute bottom-2 left-2 px-2 py-0.5 bg-slate-900/80 backdrop-blur-xs text-white text-[10px] font-mono rounded-md">
+                        {(file.size / 1024).toFixed(0)} KB (Terkonversi)
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

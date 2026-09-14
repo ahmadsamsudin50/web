@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { supabase } from "../../utils/supabaseClient";
 import { toast, Toaster } from "react-hot-toast";
 import {
@@ -81,6 +81,7 @@ export default function ManualEntry() {
   // - Kategori Student: uniqueKey `${studentId}_${enrollmentId}`
   const [selectedAttendees, setSelectedAttendees] = useState([]);
   const [localSearch, setLocalSearch] = useState("");
+  const [selectedClassTab, setSelectedClassTab] = useState("all");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
@@ -160,6 +161,7 @@ export default function ManualEntry() {
     setAttendeeType(type);
     setSelectedAttendees([]);
     setLocalSearch("");
+    setSelectedClassTab("all");
   };
 
   const activeSessionData = sessions.find((s) => s.id === form.session_id);
@@ -182,6 +184,7 @@ export default function ManualEntry() {
             uniqueKey: `${std.id}_${enr.id}`,
             studentId: std.id,
             enrollmentId: enr.id,
+            classId: enr.class_id,
             className: enr.classes?.name,
             maxSessions: enr.classes?.max_sessions || 12,
             enrollmentStatus: enr.status,
@@ -202,7 +205,27 @@ export default function ManualEntry() {
     }
   }
 
+  // Rekap daftar kelas yang ada di sesi ini untuk tab filter cepat
+  const availableClassTabs = useMemo(() => {
+    if (attendeeType !== "student" || baseList.length === 0) return [];
+    const classMap = new Map();
+    baseList.forEach((item) => {
+      if (item.className) {
+        classMap.set(item.className, (classMap.get(item.className) || 0) + 1);
+      }
+    });
+    return Array.from(classMap.entries()).map(([className, count]) => ({
+      name: className,
+      count,
+    }));
+  }, [baseList, attendeeType]);
+
   const filteredList = baseList.filter((item) => {
+    // Filter berdasarkan Tab Kelas jika sedang di mode murid
+    if (attendeeType === "student" && selectedClassTab !== "all") {
+      if (item.className !== selectedClassTab) return false;
+    }
+
     const name = item.fullName?.toLowerCase() || "";
     const identifier = attendeeType === "student" ? item.nis : item.specialty;
     const search = localSearch.toLowerCase();
@@ -418,6 +441,7 @@ export default function ManualEntry() {
                   setForm({ ...form, session_id: e.target.value });
                   setSelectedAttendees([]);
                   setLocalSearch("");
+                  setSelectedClassTab("all");
                 }}
                 className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl text-xs font-medium text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
               >
@@ -460,6 +484,7 @@ export default function ManualEntry() {
           </div>
 
           <div className="flex-[1.5] bg-slate-50 border border-slate-200 rounded-2xl flex flex-col overflow-hidden h-[460px]">
+            {/* Header Kontrol: Pencarian & Tombol Pilih Semua */}
             <div className="p-3 border-b border-slate-200 bg-white flex justify-between items-center gap-2">
               <div className="relative flex-1">
                 <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -482,6 +507,60 @@ export default function ManualEntry() {
               </button>
             </div>
 
+            {/* Tab Pemisah Filter Cepat per Kelas untuk Atlet */}
+            {attendeeType === "student" && form.session_id && availableClassTabs.length > 0 && (
+              <div className="px-3 py-2 bg-slate-100/70 border-b border-slate-200 flex items-center gap-1.5 overflow-x-auto">
+                <button
+                  type="button"
+                  onClick={() => setSelectedClassTab("all")}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold whitespace-nowrap transition-all flex items-center gap-1.5 ${
+                    selectedClassTab === "all"
+                      ? "bg-blue-600 text-white shadow-xs"
+                      : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
+                  }`}
+                >
+                  <span>Semua Kelas</span>
+                  <span
+                    className={`text-[9px] px-1.5 py-0.2 rounded-full font-bold ${
+                      selectedClassTab === "all"
+                        ? "bg-blue-700 text-white"
+                        : "bg-slate-100 text-slate-500"
+                    }`}
+                  >
+                    {baseList.length}
+                  </span>
+                </button>
+
+                {availableClassTabs.map((tab) => {
+                  const isActive = selectedClassTab === tab.name;
+                  return (
+                    <button
+                      key={tab.name}
+                      type="button"
+                      onClick={() => setSelectedClassTab(tab.name)}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold whitespace-nowrap transition-all flex items-center gap-1.5 ${
+                        isActive
+                          ? "bg-blue-600 text-white shadow-xs"
+                          : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
+                      }`}
+                    >
+                      <Layers size={12} className={isActive ? "text-blue-200" : "text-blue-500"} />
+                      <span>{tab.name}</span>
+                      <span
+                        className={`text-[9px] px-1.5 py-0.2 rounded-full font-bold ${
+                          isActive
+                            ? "bg-blue-700 text-white"
+                            : "bg-slate-100 text-slate-500"
+                        }`}
+                      >
+                        {tab.count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
             <div className="flex-1 overflow-y-auto p-2">
               {!form.session_id ? (
                 <div className="h-full flex items-center justify-center text-slate-400 text-xs">
@@ -489,7 +568,7 @@ export default function ManualEntry() {
                 </div>
               ) : filteredList.length === 0 ? (
                 <div className="h-full flex items-center justify-center text-slate-400 text-xs">
-                  Tidak ada peserta ditemukan untuk sesi ini
+                  Tidak ada peserta ditemukan untuk kriteria ini
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">

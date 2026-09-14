@@ -14,6 +14,53 @@ import {
   CheckCircle2,
 } from "lucide-react";
 
+function CustomConfirmModal({
+  isOpen,
+  onClose,
+  onConfirm,
+  title,
+  message,
+  confirmLabel = "Ya, Hapus",
+  isDestructive = true,
+}) {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden p-6 text-center animate-in zoom-in-95 duration-200">
+        <div
+          className={`w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4 ${
+            isDestructive ? "bg-rose-50 text-rose-500" : "bg-blue-50 text-blue-600"
+          }`}
+        >
+          <AlertTriangle size={28} />
+        </div>
+        <h3 className="text-base font-black text-slate-800 mb-2">{title}</h3>
+        <p className="text-xs text-slate-500 leading-relaxed mb-6">{message}</p>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl text-xs transition-all"
+          >
+            Batal
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className={`flex-1 py-2.5 font-bold rounded-xl text-xs text-white shadow-md transition-all active:scale-95 ${
+              isDestructive
+                ? "bg-rose-600 hover:bg-rose-700 shadow-rose-600/30"
+                : "bg-blue-600 hover:bg-blue-700 shadow-blue-600/30"
+            }`}
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AnnouncementManage() {
   const [announcements, setAnnouncements] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -22,6 +69,30 @@ export default function AnnouncementManage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [currentId, setCurrentId] = useState(null);
+
+  const [confirmState, setConfirmState] = useState({
+    isOpen: false,
+    title: "",
+    message: "",
+    confirmLabel: "Hapus",
+    isDestructive: true,
+    onConfirm: null,
+  });
+
+  const triggerConfirm = ({ title, message, confirmLabel, isDestructive, onConfirm }) => {
+    setConfirmState({
+      isOpen: true,
+      title,
+      message,
+      confirmLabel: confirmLabel || "Ya, Hapus",
+      isDestructive: Boolean(isDestructive),
+      onConfirm,
+    });
+  };
+
+  const closeConfirm = () => {
+    setConfirmState((prev) => ({ ...prev, isOpen: false, onConfirm: null }));
+  };
 
   const initialForm = {
     title: "",
@@ -110,17 +181,30 @@ export default function AnnouncementManage() {
     }
   };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm("Apakah Anda yakin ingin menghapus pengumuman ini?")) return;
-    const loadingToast = toast.loading("Menghapus...");
-    try {
-      const { error } = await supabase.from("announcements").delete().eq("id", id);
-      if (error) throw error;
-      toast.success("Pengumuman berhasil dihapus!", { id: loadingToast });
-      fetchAnnouncements();
-    } catch (err) {
-      toast.error(err.message, { id: loadingToast });
-    }
+  const handleDelete = (item) => {
+    triggerConfirm({
+      title: "Hapus Pengumuman?",
+      message: (
+        <>
+          Apakah Anda yakin ingin menghapus pengumuman{" "}
+          <span className="font-bold text-slate-700">"{item.title}"</span>? Tindakan ini tidak dapat dibatalkan.
+        </>
+      ),
+      confirmLabel: "Hapus Permanen",
+      isDestructive: true,
+      onConfirm: async () => {
+        closeConfirm();
+        const loadingToast = toast.loading("Menghapus pengumuman...");
+        try {
+          const { error } = await supabase.from("announcements").delete().eq("id", item.id);
+          if (error) throw error;
+          toast.success("Pengumuman berhasil dihapus!", { id: loadingToast });
+          fetchAnnouncements();
+        } catch (err) {
+          toast.error(err.message, { id: loadingToast });
+        }
+      },
+    });
   };
 
   const toggleStatus = async (item) => {
@@ -157,6 +241,17 @@ export default function AnnouncementManage() {
   return (
     <div className="min-h-screen bg-[#f8fafc] p-4 md:p-8 font-sans">
       <Toaster position="top-right" />
+
+      <CustomConfirmModal
+        isOpen={confirmState.isOpen}
+        onClose={closeConfirm}
+        onConfirm={confirmState.onConfirm}
+        title={confirmState.title}
+        message={confirmState.message}
+        confirmLabel={confirmState.confirmLabel}
+        isDestructive={confirmState.isDestructive}
+      />
+
       <div className="max-w-7xl mx-auto mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight flex items-center gap-3">
@@ -246,7 +341,7 @@ export default function AnnouncementManage() {
                   <Edit3 size={15} />
                 </button>
                 <button
-                  onClick={() => handleDelete(item.id)}
+                  onClick={() => handleDelete(item)}
                   className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
                   title="Hapus Pengumuman"
                 >

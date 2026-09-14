@@ -10,6 +10,8 @@ import {
   ChevronRight,
   ArrowUpDown,
   X,
+  Timer,
+  CheckCircle2,
 } from "lucide-react";
 
 export default function CoachLogs() {
@@ -124,6 +126,10 @@ export default function CoachLogs() {
   const totalSick = logs.filter((l) => l.status === "sakit").length;
   const totalAbsent = logs.filter((l) => l.status === "alpa").length;
 
+  // Indikator Jam Terbang & Rasio Presensi (Standar per sesi renang klub = 1.5 jam)
+  const totalHoursTrained = Number((totalPresent * 1.5).toFixed(1));
+  const attendanceRate = logs.length > 0 ? Math.round((totalPresent / logs.length) * 100) : 0;
+
   const hasActiveFilters = searchQuery || filterStatus !== "all" || dateFrom || dateTo;
   const clearFilters = () => {
     setSearchQuery("");
@@ -154,6 +160,62 @@ export default function CoachLogs() {
         </p>
       </div>
 
+      {/* Baris 1: Rekap Utama Jam Terbang & Sesi Terlaksana */}
+      <div className="max-w-7xl mx-auto grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+        <div className="bg-gradient-to-br from-blue-700 via-blue-800 to-[#0a192f] text-white rounded-2xl p-5 border border-blue-600/30 shadow-md flex items-center justify-between">
+          <div>
+            <span className="text-[10px] font-bold uppercase tracking-widest text-blue-200 block mb-1">
+              Total Jam Terbang Melatih
+            </span>
+            <div className="flex items-baseline gap-2">
+              <span className="text-3xl font-black">{totalHoursTrained}</span>
+              <span className="text-xs font-semibold text-blue-200">Jam Terlaksana</span>
+            </div>
+            <p className="text-[11px] text-blue-300 mt-1">Estimasi akumulasi sesi hadir aktif</p>
+          </div>
+          <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center backdrop-blur-md shrink-0">
+            <Timer size={24} className="text-cyan-300" />
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex items-center justify-between">
+          <div>
+            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 block mb-1">
+              Sesi Tugas Selesai
+            </span>
+            <div className="flex items-baseline gap-2">
+              <span className="text-3xl font-black text-slate-800">{totalPresent}</span>
+              <span className="text-xs font-semibold text-slate-400">/ {logs.length} Sesi Terjadwal</span>
+            </div>
+            <p className="text-[11px] text-emerald-600 font-semibold mt-1 flex items-center gap-1">
+              <CheckCircle2 size={13} /> {attendanceRate}% Rasio Kehadiran
+            </p>
+          </div>
+          <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+            <CalendarDays size={24} />
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex items-center justify-between">
+          <div>
+            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 block mb-1">
+              Sesi Perlu Perhatian
+            </span>
+            <div className="flex items-baseline gap-2">
+              <span className="text-3xl font-black text-slate-800">{totalExcused + totalSick + totalAbsent}</span>
+              <span className="text-xs font-semibold text-slate-400">Total Absen</span>
+            </div>
+            <p className="text-[11px] text-slate-500 mt-1">
+              Izin: {totalExcused} • Sakit: {totalSick} • Alpa: {totalAbsent}
+            </p>
+          </div>
+          <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+            <Clock size={24} />
+          </div>
+        </div>
+      </div>
+
+      {/* Baris 2: Rincian Kategori Status */}
       <div className="max-w-7xl mx-auto grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
         {[
           { label: "Hadir", value: totalPresent, color: "text-emerald-600", bg: "bg-emerald-50/60" },

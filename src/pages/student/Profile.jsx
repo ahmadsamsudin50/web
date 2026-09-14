@@ -5,7 +5,8 @@ import { toast, Toaster } from "react-hot-toast";
 import {
   Download, User, MapPin, Phone,
   ShieldCheck, Contact, Edit3, X, Save,
-  Mail, Lock, Eye, EyeOff, Calendar, Layers, CheckCircle2, AlertCircle, Bell, Info, Clock
+  Mail, Lock, Eye, EyeOff, Calendar, Layers, CheckCircle2, AlertCircle, Bell, Info, Clock,
+  Sun, Maximize2, Sparkles
 } from "lucide-react";
 
 // Komponen Feed Pengumuman Khusus Atlet
@@ -85,6 +86,11 @@ export default function Profile() {
   const [attendanceCounts, setAttendanceCounts] = useState({});
   const [loading, setLoading] = useState(true);
   const qrRef = useRef(null);
+  const fullscreenQrRef = useRef(null);
+
+  // State Fitur Optimasi Pindai Kolam
+  const [highBrightnessMode, setHighBrightnessMode] = useState(false);
+  const [isFullscreenQrOpen, setIsFullscreenQrOpen] = useState(false);
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -146,7 +152,7 @@ export default function Profile() {
 
   const handleDownloadQR = () => {
     const loadingToast = toast.loading("Menyiapkan Kartu Digital Anda...");
-    const svgElement = qrRef.current?.querySelector("svg");
+    const svgElement = qrRef.current?.querySelector("svg") || fullscreenQrRef.current?.querySelector("svg");
     
     if (!svgElement) {
       toast.error("Kode QR belum siap.", { id: loadingToast });
@@ -291,16 +297,53 @@ export default function Profile() {
       {/* Papan Pengumuman Klub */}
       <AnnouncementFeed />
 
-      <div className="text-center mb-8 flex flex-col items-center">
+      <div className="text-center mb-6 flex flex-col items-center">
         <h1 className="text-2xl font-black text-slate-800 tracking-tight">Kartu Digital</h1>
         <p className="text-slate-500 text-sm mt-1">Tunjukkan kode QR ini untuk pemindaian kehadiran latihan.</p>
       </div>
 
+      {/* Kontrol Cepat Pemindaian di Kolam Renang */}
+      <div className="w-full max-w-sm mb-4 flex gap-2">
+        <button
+          type="button"
+          onClick={() => {
+            setHighBrightnessMode(!highBrightnessMode);
+            if (!highBrightnessMode) {
+              toast.success("Mode Kontras Terang diaktifkan!");
+            }
+          }}
+          className={`flex-1 py-2.5 px-3 rounded-2xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-95 border ${
+            highBrightnessMode
+              ? "bg-amber-400 text-amber-950 border-amber-500 shadow-sm"
+              : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50 shadow-xs"
+          }`}
+        >
+          <Sun size={15} className={highBrightnessMode ? "text-amber-950" : "text-amber-500"} />
+          <span>{highBrightnessMode ? "Kontras Normal" : "Mode Pindai Terang"}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setIsFullscreenQrOpen(true)}
+          className="py-2.5 px-3.5 bg-white border border-slate-200 hover:bg-slate-50 text-blue-600 rounded-2xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 active:scale-95"
+          title="Tampilkan QR Layar Penuh"
+        >
+          <Maximize2 size={15} />
+          <span>Layar Penuh</span>
+        </button>
+      </div>
+
       <div className="w-full max-w-sm relative group">
-        <div className="absolute -inset-1 bg-gradient-to-b from-blue-600 to-cyan-400 rounded-[2.5rem] blur-lg opacity-20 group-hover:opacity-40 transition duration-500"></div>
+        {!highBrightnessMode && (
+          <div className="absolute -inset-1 bg-gradient-to-b from-blue-600 to-cyan-400 rounded-[2.5rem] blur-lg opacity-20 group-hover:opacity-40 transition duration-500"></div>
+        )}
         
-        <div className="relative bg-white rounded-[2rem] shadow-2xl overflow-hidden border border-slate-100 flex flex-col">
-          <div className="bg-[#0a192f] p-6 relative overflow-hidden">
+        <div className={`relative rounded-[2rem] overflow-hidden flex flex-col transition-all duration-300 ${
+          highBrightnessMode
+            ? "bg-white border-4 border-slate-900 shadow-2xl"
+            : "bg-white rounded-[2rem] shadow-2xl border border-slate-100"
+        }`}>
+          <div className={`${highBrightnessMode ? "bg-slate-950 p-5" : "bg-[#0a192f] p-6"} relative overflow-hidden`}>
             <ShieldCheck size={120} className="absolute -right-6 -top-6 text-white/5 rotate-12" />
             
             <div className="relative z-10 flex flex-col items-center text-center">
@@ -353,18 +396,22 @@ export default function Profile() {
             </div>
           </div>
 
-          <div className="p-8 flex flex-col items-center bg-white relative z-10">
+          <div className={`p-8 flex flex-col items-center relative z-10 ${highBrightnessMode ? "bg-white" : "bg-white"}`}>
             <div 
               ref={qrRef} 
-              className="p-3 bg-white rounded-3xl shadow-[0_0_40px_rgba(0,0,0,0.08)] border border-slate-50 transform group-hover:scale-105 transition-transform duration-500"
+              className={`p-3 bg-white rounded-3xl transition-transform duration-500 ${
+                highBrightnessMode 
+                  ? "border-4 border-black p-4 shadow-none" 
+                  : "shadow-[0_0_40px_rgba(0,0,0,0.08)] border border-slate-50 group-hover:scale-105"
+              }`}
             >
               {studentData.qr_token ? (
                 <QRCodeSVG
                   value={studentData.qr_token}
-                  size={180}
+                  size={highBrightnessMode ? 190 : 180}
                   level={"H"}
                   includeMargin={false}
-                  fgColor="#0a192f"
+                  fgColor="#000000"
                 />
               ) : (
                 <div className="w-[180px] h-[180px] flex items-center justify-center text-slate-400 bg-slate-50 rounded-2xl text-xs font-medium">
@@ -372,7 +419,9 @@ export default function Profile() {
                 </div>
               )}
             </div>
-            <p className="mt-5 font-mono text-slate-400 text-xs tracking-widest font-bold">
+            <p className={`mt-5 font-mono text-xs tracking-widest font-bold ${
+              highBrightnessMode ? "text-slate-900 text-sm" : "text-slate-400"
+            }`}>
               ID: {studentData.nis}
             </p>
           </div>
@@ -442,6 +491,56 @@ export default function Profile() {
           Pengaturan Akun
         </button>
       </div>
+
+      {/* Modal Layar Penuh QR Code (Optimasi Pemindaian Cepat) */}
+      {isFullscreenQrOpen && (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="bg-white rounded-[2.5rem] p-8 max-w-sm w-full flex flex-col items-center text-center shadow-2xl relative">
+            <button
+              type="button"
+              onClick={() => setIsFullscreenQrOpen(false)}
+              className="absolute top-4 right-4 p-2 rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200 transition-colors"
+              title="Tutup"
+            >
+              <X size={20} />
+            </button>
+
+            <span className="text-[10px] font-black uppercase tracking-widest text-blue-600 bg-blue-50 px-3 py-1 rounded-full mb-3">
+              Siripbiru Pass
+            </span>
+
+            <h3 className="text-lg font-bold text-slate-900 mb-1">
+              {studentData.users?.full_name || "Atlet"}
+            </h3>
+            <p className="text-xs text-slate-400 mb-6 font-mono font-semibold">
+              NIS: {studentData.nis}
+            </p>
+
+            <div 
+              ref={fullscreenQrRef}
+              className="p-4 bg-white border-4 border-slate-900 rounded-3xl shadow-lg"
+            >
+              {studentData.qr_token ? (
+                <QRCodeSVG
+                  value={studentData.qr_token}
+                  size={240}
+                  level={"H"}
+                  includeMargin={false}
+                  fgColor="#000000"
+                />
+              ) : (
+                <div className="w-[240px] h-[240px] flex items-center justify-center text-slate-400">
+                  QR Tidak Tersedia
+                </div>
+              )}
+            </div>
+
+            <p className="text-xs text-slate-500 mt-6 font-medium">
+              Tunjukkan langsung ke pemindai admin di tepi kolam renang
+            </p>
+          </div>
+        </div>
+      )}
 
       {isEditModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
