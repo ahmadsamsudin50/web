@@ -99,6 +99,8 @@ export default function ScanQR() {
 
   const html5QrCodeRef = useRef(null);
   const isProcessingRef = useRef(false);
+  const lastScannedTokenRef = useRef(null);
+  const tokenResetTimeoutRef = useRef(null);
   const activeSessionsRef = useRef([]);
   const { playSuccess, playError } = useAudioFeedback();
   const { successVibrate, errorVibrate } = useHapticFeedback();
@@ -189,13 +191,29 @@ export default function ScanQR() {
       setTimeout(() => {
         setScanStatus({ type: "idle", message: "" });
         isProcessingRef.current = false;
-      }, 2500);
+      }, 1500);
     }
   };
 
   const handleBarcodeDecoded = async (decodedText) => {
-    if (isProcessingRef.current) return;
+    const cleanToken = decodedText?.trim();
+    if (!cleanToken) return;
+
+    // Abaikan jika pemindai sedang memproses atau kartu yang sama masih tertahan di depan kamera
+    if (isProcessingRef.current || lastScannedTokenRef.current === cleanToken) {
+      return;
+    }
+
     isProcessingRef.current = true;
+    lastScannedTokenRef.current = cleanToken;
+
+    // Reset lock token setelah 3 detik jika kartu sudah ditarik dari kamera
+    if (tokenResetTimeoutRef.current) {
+      clearTimeout(tokenResetTimeoutRef.current);
+    }
+    tokenResetTimeoutRef.current = setTimeout(() => {
+      lastScannedTokenRef.current = null;
+    }, 3000);
 
     setScanStatus({ type: "info", message: "Memverifikasi Kode QR..." });
 
@@ -204,7 +222,7 @@ export default function ScanQR() {
       const { data: student, error: studentError } = await supabase
         .from("students")
         .select("id, users(full_name)")
-        .eq("qr_token", decodedText.trim())
+        .eq("qr_token", cleanToken)
         .single();
 
       if (studentError || !student) {
@@ -283,7 +301,7 @@ export default function ScanQR() {
       setTimeout(() => {
         setScanStatus({ type: "idle", message: "" });
         isProcessingRef.current = false;
-      }, 2500);
+      }, 1500);
     }
   };
 
@@ -368,6 +386,9 @@ export default function ScanQR() {
     return () => {
       isSubscribed = false;
       clearTimeout(timer);
+      if (tokenResetTimeoutRef.current) {
+        clearTimeout(tokenResetTimeoutRef.current);
+      }
       stopCamera();
     };
   }, [selectedSession]);
@@ -441,6 +462,7 @@ export default function ScanQR() {
               onChange={(e) => {
                 setSelectedSession(e.target.value);
                 setScanStatus({ type: "idle", message: "" });
+                lastScannedTokenRef.current = null;
               }}
               className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl text-sm font-medium text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
             >
