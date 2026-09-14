@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { supabase } from "../../utils/supabaseClient";
 import {
   Users,
@@ -10,6 +10,8 @@ import {
   Loader2,
   HardDrive,
   Database,
+  RefreshCw,
+  Radio,
 } from "lucide-react";
 import {
   AreaChart,
@@ -31,41 +33,72 @@ export default function Dashboard() {
     activeSessions: 0,
     totalLogs: 0,
   });
+
   const [storageUsage, setStorageUsage] = useState({
     usedMb: 0,
     maxMb: 1024,
     percent: 0,
     fileCount: 0,
   });
+
   const [dbUsage, setDbUsage] = useState({
     usedMb: 0,
-    maxMb: 500, // Kuota Free Tier Database Supabase (500 MB)
+    maxMb: 500,
     percent: 0,
   });
+
   const [trendData, setTrendData] = useState([]);
   const [classDistData, setClassDistData] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const isFetchingRef = useRef(false);
 
-  useEffect(() => {
-    const fetchDashboardData = async () => {
-      setLoading(true);
+  const calculateBucketStorage = async (bucketName, prefix = "") => {
+    let totalBytes = 0;
+    let totalFiles = 0;
 
+    const traverse = async (folderPath) => {
+      const { data, error } = await supabase.storage
+        .from(bucketName)
+        .list(folderPath, { limit: 1000 });
+
+      if (error || !data) return;
+
+      for (const item of data) {
+        if (item.id === null) {
+          const subPath = folderPath ? `${folderPath}/${item.name}` : item.name;
+          await traverse(subPath);
+        } else if (item.metadata?.size) {
+          totalBytes += item.metadata.size;
+          totalFiles += 1;
+        }
+      }
+    };
+
+    await traverse(prefix);
+    return { totalBytes, totalFiles };
+  };
+
+  const fetchDashboardData = useCallback(async (isSilent = false) => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
+
+    if (!isSilent) setLoading(true);
+    else setIsRefreshing(true);
+
+    try {
       // 1. Ambil Statistik Baris Data
-      const { count: classCount } = await supabase
-        .from("classes")
-        .select("*", { count: "exact", head: true });
-
-      const { count: studentCount } = await supabase
-        .from("students")
-        .select("*", { count: "exact", head: true });
-
-      const { count: sessionCount } = await supabase
-        .from("sessions")
-        .select("*", { count: "exact", head: true });
-
-      const { count: logCount } = await supabase
-        .from("attendance_logs")
-        .select("*", { count: "exact", head: true });
+      const [
+        { count: classCount },
+        { count: studentCount },
+        { count: sessionCount },
+        { count: logCount },
+      ] = await Promise.all([
+        supabase.from("classes").select("*", { count: "exact", head: true }),
+        supabase.from("students").select("*", { count: "exact", head: true }),
+        supabase.from("sessions").select("*", { count: "exact", head: true }),
+        supabase.from("attendance_logs").select("*", { count: "exact", head: true }),
+      ]);
 
       setStats({
         classes: classCount || 0,
@@ -74,28 +107,9 @@ export default function Dashboard() {
         totalLogs: logCount || 0,
       });
 
-      // 2. Hitung Penggunaan Berkas Storage (Bucket: images)
+      // 2. Hitung Penggunaan Berkas Storage
       try {
-        const folders = ["", "receipts", "coaches", "gallery"];
-        let totalBytes = 0;
-        let totalFiles = 0;
-
-        await Promise.all(
-          folders.map(async (folder) => {
-            const { data, error } = await supabase.storage
-              .from("images")
-              .list(folder, { limit: 1000 });
-            if (!error && data) {
-              data.forEach((item) => {
-                if (item.metadata?.size) {
-                  totalBytes += item.metadata.size;
-                  totalFiles += 1;
-                }
-              });
-            }
-          })
-        );
-
+        const { totalBytes, totalFiles } = await calculateBucketStorage("images");
         const usedMb = Number((totalBytes / (1024 * 1024)).toFixed(2));
         const maxMb = 1024;
         const percent = Math.min(Number(((usedMb / maxMb) * 100).toFixed(1)), 100);
@@ -106,25 +120,29 @@ export default function Dashboard() {
           percent,
           fileCount: totalFiles,
         });
-      } catch (_) {}
+      } catch (err) {
+        console.warn("Storage metrics warning:", err);
+      }
 
-      // 3. Ambil Ukuran Database PostgreSQL melalui RPC
+      // 3. Ambil Ukuran Database Postgres via RPC
       try {
         const { data: dbBytes, error: dbError } = await supabase.rpc("get_db_size_bytes");
-        if (!dbError && dbBytes) {
+        if (!dbError && dbBytes !== null) {
           const usedDbMb = Number((Number(dbBytes) / (1024 * 1024)).toFixed(2));
           const maxDbMb = 500;
           const percentDb = Math.min(Number(((usedDbMb / maxDbMb) * 100).toFixed(1)), 100);
 
           setDbUsage({
             usedMb: usedDbMb,
-            maxMb: maxDbMb,
+            maxDbMb,
             percent: percentDb,
           });
         }
-      } catch (_) {}
+      } catch (err) {
+        console.warn("Database metrics warning:", err);
+      }
 
-      // 4. Ambil Tren Kehadiran
+      // 4. Tren Kehadiran
       const { data: logs } = await supabase
         .from("attendance_logs")
         .select(`id, sessions(session_date)`);
@@ -152,7 +170,7 @@ export default function Dashboard() {
         setTrendData(formattedTrend);
       }
 
-      // 5. Ambil Distribusi Atlet per Kelas
+      // 5. Distribusi Kelas
       const { data: enrollmentsData } = await supabase
         .from("student_enrollments")
         .select(`classes(name)`)
@@ -174,12 +192,56 @@ export default function Dashboard() {
 
         setClassDistData(formattedDist);
       }
-
+    } catch (error) {
+      console.error("Gagal sinkronisasi data dasbor:", error);
+    } finally {
+      isFetchingRef.current = false;
       setLoading(false);
-    };
-
-    fetchDashboardData();
+      setIsRefreshing(false);
+    }
   }, []);
+
+  useEffect(() => {
+    fetchDashboardData();
+
+    const channel = supabase
+      .channel("dashboard-realtime-tracker")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "students" },
+        () => fetchDashboardData(true)
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "classes" },
+        () => fetchDashboardData(true)
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "sessions" },
+        () => fetchDashboardData(true)
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "attendance_logs" },
+        () => fetchDashboardData(true)
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "student_enrollments" },
+        () => fetchDashboardData(true)
+      )
+      .subscribe();
+
+    const interval = setInterval(() => {
+      fetchDashboardData(true);
+    }, 60000);
+
+    return () => {
+      supabase.removeChannel(channel);
+      clearInterval(interval);
+    };
+  }, [fetchDashboardData]);
 
   const StatCard = ({ title, value, icon, colorClass, bgClass }) => (
     <div className="bg-white p-6 rounded-3xl shadow-xl shadow-blue-900/5 border border-slate-100 flex items-center gap-5 hover:-translate-y-1 transition-transform duration-300">
@@ -212,13 +274,31 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-[#f8fafc] p-4 md:p-8 font-sans">
-      <div className="max-w-7xl mx-auto mb-8">
-        <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">
-          Gambaran Umum
-        </h1>
-        <p className="text-slate-500 mt-1 text-sm">
-          Statistik langsung dan metrik performa klub renang.
-        </p>
+      <div className="max-w-7xl mx-auto mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">
+            Gambaran Umum
+          </h1>
+          <p className="text-slate-500 mt-1 text-sm">
+            Statistik langsung dan metrik performa klub renang.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-full border border-emerald-200 text-xs font-semibold">
+            <Radio size={14} className="animate-pulse text-emerald-500" />
+            <span>Live Realtime Active</span>
+          </div>
+
+          <button
+            onClick={() => fetchDashboardData(true)}
+            disabled={isRefreshing}
+            className="p-2.5 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl text-slate-600 shadow-sm transition-all disabled:opacity-50"
+            title="Muat ulang data"
+          >
+            <RefreshCw size={16} className={isRefreshing ? "animate-spin" : ""} />
+          </button>
+        </div>
       </div>
 
       {/* Baris 1: Statistik Operasional */}
@@ -255,7 +335,6 @@ export default function Dashboard() {
 
       {/* Baris 2: Pemantauan Storage & Database */}
       <div className="max-w-7xl mx-auto grid grid-cols-1 sm:grid-cols-2 gap-5 mb-8">
-        {/* Kartu Storage Berkas */}
         <div className="bg-white p-6 rounded-3xl shadow-xl shadow-blue-900/5 border border-slate-100 flex flex-col justify-between hover:-translate-y-1 transition-transform duration-300">
           <div className="flex items-center justify-between mb-3">
             <span className="text-slate-400 text-[10px] font-black uppercase tracking-widest">
@@ -286,13 +365,13 @@ export default function Dashboard() {
                 style={{ width: `${Math.max(storageUsage.percent, 2)}%` }}
               />
             </div>
-            <p className="text-[11px] text-slate-400 font-semibold">
-              {storageUsage.percent}% terpakai ({storageUsage.fileCount} total file gambar/bukti)
-            </p>
+            <div className="flex items-center justify-between text-[11px] text-slate-400 font-semibold">
+              <span>{storageUsage.percent}% terpakai ({storageUsage.fileCount} total file)</span>
+              <span>Sisa: {(storageUsage.maxMb - storageUsage.usedMb).toFixed(2)} MB</span>
+            </div>
           </div>
         </div>
 
-        {/* Kartu Kapasitas Database */}
         <div className="bg-white p-6 rounded-3xl shadow-xl shadow-blue-900/5 border border-slate-100 flex flex-col justify-between hover:-translate-y-1 transition-transform duration-300">
           <div className="flex items-center justify-between mb-3">
             <span className="text-slate-400 text-[10px] font-black uppercase tracking-widest">
@@ -323,21 +402,20 @@ export default function Dashboard() {
                 style={{ width: `${Math.max(dbUsage.percent, 2)}%` }}
               />
             </div>
-            <p className="text-[11px] text-slate-400 font-semibold">
-              {dbUsage.percent}% terpakai dari kuota free tier Supabase
-            </p>
+            <div className="flex items-center justify-between text-[11px] text-slate-400 font-semibold">
+              <span>{dbUsage.percent}% terpakai</span>
+              <span>Sisa: {(dbUsage.maxMb - dbUsage.usedMb).toFixed(2)} MB</span>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Bagian Grafik Analitik */}
+      {/* Bagian Grafik Analitik (Fixed Responsive Dimensions) */}
       <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-6 pb-10">
         <div className="bg-white p-6 md:p-8 rounded-3xl shadow-xl shadow-blue-900/5 border border-slate-100 flex flex-col h-[400px]">
-          <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center justify-between mb-4">
             <div>
-              <h2 className="text-lg font-bold text-slate-800">
-                Tren Kehadiran
-              </h2>
+              <h2 className="text-lg font-bold text-slate-800">Tren Kehadiran</h2>
               <p className="text-xs font-medium text-slate-400 mt-0.5">
                 Jumlah presensi pada 7 sesi terakhir
               </p>
@@ -346,30 +424,20 @@ export default function Dashboard() {
               <TrendingUp size={20} />
             </div>
           </div>
-          <div className="flex-1 w-full mt-4">
+          <div className="flex-1 w-full min-w-0 mt-2 min-h-[280px]">
             {trendData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={260}>
                 <AreaChart
                   data={trendData}
                   margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
                 >
                   <defs>
-                    <linearGradient
-                      id="colorAttendance"
-                      x1="0"
-                      y1="0"
-                      x2="0"
-                      y2="1"
-                    >
+                    <linearGradient id="colorAttendance" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#2563eb" stopOpacity={0.3} />
                       <stop offset="95%" stopColor="#2563eb" stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    vertical={false}
-                    stroke="#f1f5f9"
-                  />
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                   <XAxis
                     dataKey="date"
                     axisLine={false}
@@ -414,11 +482,9 @@ export default function Dashboard() {
         </div>
 
         <div className="bg-white p-6 md:p-8 rounded-3xl shadow-xl shadow-blue-900/5 border border-slate-100 flex flex-col h-[400px]">
-          <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center justify-between mb-4">
             <div>
-              <h2 className="text-lg font-bold text-slate-800">
-                Distribusi Atlet
-              </h2>
+              <h2 className="text-lg font-bold text-slate-800">Distribusi Atlet</h2>
               <p className="text-xs font-medium text-slate-400 mt-0.5">
                 Jumlah atlet terdaftar per kelompok kelas aktif
               </p>
@@ -427,18 +493,14 @@ export default function Dashboard() {
               <BarChart3 size={20} />
             </div>
           </div>
-          <div className="flex-1 w-full mt-4">
+          <div className="flex-1 w-full min-w-0 mt-2 min-h-[280px]">
             {classDistData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={260}>
                 <BarChart
                   data={classDistData}
                   margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
                 >
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    vertical={false}
-                    stroke="#f1f5f9"
-                  />
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                   <XAxis
                     dataKey="name"
                     axisLine={false}
@@ -461,10 +523,7 @@ export default function Dashboard() {
                   />
                   <Bar dataKey="Atlet" radius={[6, 6, 0, 0]} maxBarSize={50}>
                     {classDistData.map((entry, index) => (
-                      <Cell
-                        key={`cell-${index}`}
-                        fill={COLORS[index % COLORS.length]}
-                      />
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                     ))}
                   </Bar>
                 </BarChart>

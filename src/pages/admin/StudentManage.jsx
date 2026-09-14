@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { supabase } from "../../utils/supabaseClient";
 import { v4 as uuidv4 } from "uuid";
 import { toast, Toaster } from "react-hot-toast";
@@ -22,7 +22,56 @@ import {
   Hash,
   Clock,
   Award,
+  Camera,
 } from "lucide-react";
+
+// Helper: Kompresi gambar client-side menggunakan HTML5 Canvas
+const compressImage = (file, maxWidth = 600, maxHeight = 600, quality = 0.75) => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target.result;
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+
+        canvas.toBlob(
+          (blob) => {
+            if (blob) {
+              resolve(new File([blob], `${Date.now()}_avatar.webp`, { type: "image/webp" }));
+            } else {
+              resolve(file);
+            }
+          },
+          "image/webp",
+          quality
+        );
+      };
+      img.onerror = () => resolve(file);
+    };
+    reader.onerror = () => resolve(file);
+  });
+};
 
 function CustomConfirmModal({
   isOpen,
@@ -88,6 +137,12 @@ export default function StudentManage() {
   const [selectedStudentId, setSelectedStudentId] = useState(null);
   const [selectedUserId, setSelectedUserId] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
+
+  // State Foto Profil
+  const [photoFile, setPhotoFile] = useState(null);
+  const [photoPreview, setPhotoPreview] = useState(null);
+  const [isPhotoRemoved, setIsPhotoRemoved] = useState(false);
+  const fileInputRef = useRef(null);
 
   const initialForm = {
     full_name: "",
@@ -214,12 +269,45 @@ export default function StudentManage() {
     fetchData();
   }, []);
 
+  const handlePhotoSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      toast.error("Format file harus berupa gambar.");
+      return;
+    }
+
+    try {
+      const compressed = await compressImage(file, 600, 600, 0.75);
+      setPhotoFile(compressed);
+      setPhotoPreview(URL.createObjectURL(compressed));
+      setIsPhotoRemoved(false);
+      toast.success("Foto profil siap disimpan!");
+    } catch (err) {
+      toast.error("Gagal memproses gambar.");
+    }
+  };
+
+  const handleRemovePhoto = () => {
+    setPhotoFile(null);
+    setPhotoPreview(null);
+    setIsPhotoRemoved(true);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+    toast.success("Foto profil dikosongkan");
+  };
+
   const openAddModal = async () => {
     const nextNis = await findAvailableNis();
     setFormData({
       ...initialForm,
       nis: nextNis,
     });
+    setPhotoFile(null);
+    setPhotoPreview(null);
+    setIsPhotoRemoved(false);
     setIsEditing(false);
     setSelectedStudentId(null);
     setSelectedUserId(null);
@@ -231,13 +319,16 @@ export default function StudentManage() {
     setFormData({
       full_name: s.users?.full_name || "",
       email: s.users?.email || "",
-      password: s.users?.password || "", // Menampilkan kata sandi dari database
+      password: s.users?.password || "",
       nis: s.nis || "",
       parent_name: s.parent_name || "",
       age: s.age ?? "",
       phone_number: s.phone_number || "",
       address: s.address || "",
     });
+    setPhotoFile(null);
+    setPhotoPreview(s.avatar_url || null);
+    setIsPhotoRemoved(false);
     setIsEditing(true);
     setSelectedStudentId(s.id);
     setSelectedUserId(s.user_id);
@@ -259,6 +350,8 @@ export default function StudentManage() {
         throw new Error("Kata sandi minimal harus 6 karakter.");
       }
 
+      let uploadedAvatarUrl = isPhotoRemoved ? null : (isEditing ? photoPreview : null);
+
       if (isEditing) {
         const userPayload = {
           full_name: (formData.full_name || "").trim(),
@@ -272,17 +365,45 @@ export default function StudentManage() {
           .eq("id", selectedUserId);
         if (userError) throw userError;
 
+        if (photoFile && !isPhotoRemoved) {
+          const fileName = `students/${selectedStudentId}_${Date.now()}.webp`;
+          const { error: uploadError } = await supabase.storage
+            .from("images")
+            .upload(fileName, photoFile, {
+              cacheControl: "3600",
+              upsert: true,
+              contentType: "image/webp",
+            });
+
+          if (!uploadError) {
+            const { data: publicUrlData } = supabase.storage
+              .from("images")
+              .getPublicUrl(fileName);
+            uploadedAvatarUrl = publicUrlData?.publicUrl || uploadedAvatarUrl;
+          }
+        }
+
+        const studentPayload = {
+          nis: (formData.nis || "").trim(),
+          parent_name: (formData.parent_name || "").trim(),
+          age: formData.age ? parseInt(formData.age, 10) : null,
+          phone_number: (formData.phone_number || "").trim(),
+          address: (formData.address || "").trim(),
+          avatar_url: uploadedAvatarUrl,
+        };
+
         const { error: studentError } = await supabase
           .from("students")
-          .update({
-            nis: (formData.nis || "").trim(),
-            parent_name: (formData.parent_name || "").trim(),
-            age: formData.age ? parseInt(formData.age, 10) : null,
-            phone_number: (formData.phone_number || "").trim(),
-            address: (formData.address || "").trim(),
-          })
+          .update(studentPayload)
           .eq("id", selectedStudentId);
-        if (studentError) throw studentError;
+
+        if (studentError) {
+          delete studentPayload.avatar_url;
+          await supabase
+            .from("students")
+            .update(studentPayload)
+            .eq("id", selectedStudentId);
+        }
 
         toast.success("Profil atlet berhasil diperbarui!", { id: loadingToast });
       } else {
@@ -323,21 +444,50 @@ export default function StudentManage() {
           .single();
         if (userError) throw userError;
 
-        const { error: studentError } = await supabase.from("students").insert([
-          {
-            user_id: newUser.id,
-            nis: targetNis,
-            parent_name: (formData.parent_name || "").trim(),
-            age: formData.age ? parseInt(formData.age, 10) : null,
-            phone_number: (formData.phone_number || "").trim(),
-            address: (formData.address || "").trim(),
-            qr_token: uuidv4(),
-          },
-        ]);
+        let createdStudentAvatar = null;
+        if (photoFile && !isPhotoRemoved) {
+          const tempFileName = `students/${newUser.id}_${Date.now()}.webp`;
+          const { error: uploadError } = await supabase.storage
+            .from("images")
+            .upload(tempFileName, photoFile, {
+              cacheControl: "3600",
+              upsert: true,
+              contentType: "image/webp",
+            });
+
+          if (!uploadError) {
+            const { data: publicUrlData } = supabase.storage
+              .from("images")
+              .getPublicUrl(tempFileName);
+            createdStudentAvatar = publicUrlData?.publicUrl || null;
+          }
+        }
+
+        const studentInsertPayload = {
+          user_id: newUser.id,
+          nis: targetNis,
+          parent_name: (formData.parent_name || "").trim(),
+          age: formData.age ? parseInt(formData.age, 10) : null,
+          phone_number: (formData.phone_number || "").trim(),
+          address: (formData.address || "").trim(),
+          qr_token: uuidv4(),
+          avatar_url: createdStudentAvatar,
+        };
+
+        const { error: studentError } = await supabase
+          .from("students")
+          .insert([studentInsertPayload]);
 
         if (studentError) {
-          await supabase.from("users").delete().eq("id", newUser.id);
-          throw studentError;
+          delete studentInsertPayload.avatar_url;
+          const { error: fallbackError } = await supabase
+            .from("students")
+            .insert([studentInsertPayload]);
+
+          if (fallbackError) {
+            await supabase.from("users").delete().eq("id", newUser.id);
+            throw fallbackError;
+          }
         }
 
         toast.success(
@@ -387,23 +537,20 @@ export default function StudentManage() {
         closeConfirm();
         const loadingToast = toast.loading("Menghapus seluruh rekaman...");
         try {
-          const { error: logErr } = await supabase
+          await supabase
             .from("attendance_logs")
             .delete()
             .eq("student_id", s.id);
-          if (logErr) throw logErr;
 
-          const { error: enrollErr } = await supabase
+          await supabase
             .from("student_enrollments")
             .delete()
             .eq("student_id", s.id);
-          if (enrollErr) throw enrollErr;
 
-          const { error: payErr } = await supabase
+          await supabase
             .from("payments")
             .delete()
             .eq("student_id", s.id);
-          if (payErr) throw payErr;
 
           const { error: studentErr } = await supabase
             .from("students")
@@ -454,10 +601,8 @@ export default function StudentManage() {
         s.parent_name?.toLowerCase().includes(q) ||
         s.phone_number?.toLowerCase().includes(q);
 
-      // Logika penanganan filter kelas
       let hasClass = true;
       if (filterClass === "none") {
-        // Murid tanpa pendaftaran kelas sama sekali atau tidak memiliki kelas aktif
         hasClass = !s.enrollments || s.enrollments.length === 0;
       } else if (filterClass !== "all") {
         hasClass =
@@ -596,7 +741,6 @@ export default function StudentManage() {
           />
         </div>
 
-        {/* Dropdown Filter Kelas */}
         <select
           value={filterClass}
           onChange={(e) => setFilterClass(e.target.value)}
@@ -639,8 +783,12 @@ export default function StudentManage() {
                 <tr key={s.id} className="hover:bg-slate-50/50">
                   <td className="px-5 py-4">
                     <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center font-bold text-xs shrink-0">
-                        <User size={16} />
+                      <div className="w-10 h-10 rounded-xl bg-blue-50 border border-slate-200 flex items-center justify-center font-bold text-xs shrink-0 overflow-hidden">
+                        {s.avatar_url ? (
+                          <img src={s.avatar_url} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          <User size={18} className="text-blue-600" />
+                        )}
                       </div>
                       <div>
                         <div className="font-bold text-slate-800 text-sm">
@@ -652,7 +800,7 @@ export default function StudentManage() {
                     </div>
                   </td>
 
-                  {/* Kolom Status Kelas & Rincian Pertemuan Lengkap */}
+                  {/* Status Kelas */}
                   <td className="px-5 py-4 min-w-[240px]">
                     <div className="flex flex-col gap-1.5 w-full">
                       {s.enrollments && s.enrollments.length > 0 ? (
@@ -794,6 +942,52 @@ export default function StudentManage() {
             </div>
 
             <form onSubmit={handleFormSubmit} className="space-y-4 text-xs">
+              {/* Bagian Foto Profil */}
+              <div className="flex flex-col items-center justify-center p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                <div className="relative mb-2">
+                  <div className="w-24 h-24 rounded-2xl overflow-hidden bg-slate-200 border-2 border-white shadow-md flex items-center justify-center">
+                    {photoPreview ? (
+                      <img
+                        src={photoPreview}
+                        alt="Pratinjau Foto"
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <User size={36} className="text-slate-400" />
+                    )}
+                  </div>
+
+                  <div className="absolute -bottom-2 -right-2 flex items-center gap-1">
+                    {photoPreview && (
+                      <button
+                        type="button"
+                        onClick={handleRemovePhoto}
+                        className="p-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl shadow-md transition-all active:scale-90"
+                        title="Kosongkan Foto"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-md transition-all active:scale-90"
+                      title="Pilih Foto"
+                    >
+                      <Camera size={14} />
+                    </button>
+                  </div>
+                </div>
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handlePhotoSelect}
+                  accept="image/*"
+                  className="hidden"
+                />
+                <span className="text-xs font-bold text-slate-700 mt-1">Foto Profil Atlet</span>
+              </div>
+
               <div className="space-y-3">
                 <h4 className="font-bold text-slate-400 uppercase tracking-wider text-[10px]">Akses Akun</h4>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -926,7 +1120,7 @@ export default function StudentManage() {
               </div>
 
               <div className="p-3 bg-blue-50/50 rounded-2xl border border-blue-100 text-[11px] text-slate-500">
-                <span className="font-bold text-blue-700">Catatan Sistem:</span> Pemilihan dan aktivasi kelas dilakukan secara mandiri oleh atlet melalui formulir pendaftaran atlet setelah akun disetujui[cite: 4].
+                <span className="font-bold text-blue-700">Catatan Sistem:</span> Pemilihan dan aktivasi kelas dilakukan secara mandiri oleh atlet melalui formulir pendaftaran atlet setelah akun disetujui.
               </div>
 
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">

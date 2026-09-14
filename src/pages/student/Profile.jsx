@@ -6,8 +6,57 @@ import {
   Download, User, MapPin, Phone,
   ShieldCheck, Contact, Edit3, X, Save,
   Mail, Lock, Eye, EyeOff, Calendar, Layers, CheckCircle2, AlertCircle, Bell, Info, Clock,
-  Sun, Maximize2, Sparkles
+  Sun, Maximize2, Sparkles, Camera, Image as ImageIcon, Trash2
 } from "lucide-react";
+
+// Helper: Kompresi gambar client-side menggunakan HTML5 Canvas
+const compressImage = (file, maxWidth = 600, maxHeight = 600, quality = 0.75) => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target.result;
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // Kompresi ke format WebP untuk efisiensi penyimpanan maksimal
+        canvas.toBlob(
+          (blob) => {
+            if (blob) {
+              resolve(new File([blob], `${Date.now()}_avatar.webp`, { type: "image/webp" }));
+            } else {
+              resolve(file);
+            }
+          },
+          "image/webp",
+          quality
+        );
+      };
+      img.onerror = () => resolve(file);
+    };
+    reader.onerror = () => resolve(file);
+  });
+};
 
 // Komponen Feed Pengumuman Khusus Atlet
 function AnnouncementFeed() {
@@ -95,6 +144,13 @@ export default function Profile() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+
+  // State Unggah Foto Profil (Opsional)
+  const [photoFile, setPhotoFile] = useState(null);
+  const [photoPreview, setPhotoPreview] = useState(null);
+  const [isPhotoRemoved, setIsPhotoRemoved] = useState(false);
+  const fileInputRef = useRef(null);
+
   const [editForm, setEditForm] = useState({
     full_name: '', email: '', password: '', parent_name: '', age: '', phone_number: '', address: ''
   });
@@ -105,26 +161,38 @@ export default function Profile() {
       if (!savedUser) throw new Error("Sesi berakhir. Silakan masuk kembali.");
       const user = JSON.parse(savedUser);
 
-      // Ambil data profil student beserta riwayat enrollment
-      const { data, error } = await supabase
+      // Ambil data profil student beserta avatar_url dan riwayat enrollment
+      let profileResult = await supabase
         .from("students")
         .select(`
-          id, nis, qr_token, parent_name, age, address, phone_number, 
+          id, nis, qr_token, parent_name, age, address, phone_number, avatar_url,
           users ( full_name, email ), 
           student_enrollments ( id, status, class_id, classes ( name, max_sessions ) )
         `)
         .eq("user_id", user.id)
-        .single();
+        .maybeSingle();
 
-      if (error) throw error;
-      setStudentData(data);
+      if (profileResult.error) {
+        profileResult = await supabase
+          .from("students")
+          .select(`
+            id, nis, qr_token, parent_name, age, address, phone_number,
+            users ( full_name, email ), 
+            student_enrollments ( id, status, class_id, classes ( name, max_sessions ) )
+          `)
+          .eq("user_id", user.id)
+          .single();
+      }
 
-      // Ambil akumulasi log presensi per enrollment spesifik (P2)
-      if (data?.id) {
+      if (profileResult.error) throw profileResult.error;
+      setStudentData(profileResult.data);
+
+      // Ambil akumulasi log presensi per enrollment spesifik
+      if (profileResult.data?.id) {
         const { data: logs, error: logsError } = await supabase
           .from("attendance_logs")
           .select("enrollment_id, status")
-          .eq("student_id", data.id)
+          .eq("student_id", profileResult.data.id)
           .in("status", ["hadir_qr", "hadir_manual"]);
 
         if (!logsError && logs) {
@@ -186,6 +254,36 @@ export default function Profile() {
     }
   };
 
+  const handlePhotoSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      toast.error("Format file harus berupa gambar.");
+      return;
+    }
+
+    try {
+      const compressed = await compressImage(file, 600, 600, 0.75);
+      setPhotoFile(compressed);
+      setPhotoPreview(URL.createObjectURL(compressed));
+      setIsPhotoRemoved(false);
+      toast.success("Foto berhasil dipilih!");
+    } catch (err) {
+      toast.error("Gagal memproses foto.");
+    }
+  };
+
+  const handleRemovePhoto = () => {
+    setPhotoFile(null);
+    setPhotoPreview(null);
+    setIsPhotoRemoved(true);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+    toast.success("Foto profil dikosongkan");
+  };
+
   const openEditModal = () => {
     setEditForm({
       full_name: studentData.users?.full_name || '',
@@ -196,6 +294,9 @@ export default function Profile() {
       phone_number: studentData.phone_number || '',
       address: studentData.address || ''
     });
+    setPhotoFile(null);
+    setPhotoPreview(studentData.avatar_url || null);
+    setIsPhotoRemoved(false);
     setShowPassword(false);
     setIsEditModalOpen(true);
   };
@@ -209,7 +310,7 @@ export default function Profile() {
       const user = JSON.parse(localStorage.getItem("user_session") || "{}");
       const cleanEmail = editForm.email.trim().toLowerCase();
 
-      // P3: Validasi apakah email diubah dan sudah terdaftar pada user lain
+      // Validasi email
       if (cleanEmail !== user.email?.toLowerCase()) {
         const { data: existingUser } = await supabase
           .from("users")
@@ -243,17 +344,51 @@ export default function Profile() {
           
       if (userError) throw userError;
 
+      // Handle upload foto profil opsional atau hapus foto
+      let uploadedAvatarUrl = isPhotoRemoved ? null : studentData.avatar_url;
+
+      if (photoFile && !isPhotoRemoved) {
+        const fileName = `students/${studentData.id || user.id}_${Date.now()}.webp`;
+        
+        const { error: uploadError } = await supabase.storage
+          .from("images")
+          .upload(fileName, photoFile, {
+            cacheControl: "3600",
+            upsert: true,
+            contentType: "image/webp"
+          });
+
+        if (uploadError) {
+          console.warn("Upload gambar error:", uploadError);
+        } else {
+          const { data: publicUrlData } = supabase.storage
+            .from("images")
+            .getPublicUrl(fileName);
+
+          uploadedAvatarUrl = publicUrlData?.publicUrl || uploadedAvatarUrl;
+        }
+      }
+
+      const studentUpdatePayload = {
+        parent_name: editForm.parent_name.trim(),
+        age: editForm.age ? parseInt(editForm.age, 10) : null,
+        phone_number: editForm.phone_number.trim(),
+        address: editForm.address.trim(),
+        avatar_url: uploadedAvatarUrl
+      };
+
       const { error: studentError } = await supabase
         .from("students")
-        .update({
-          parent_name: editForm.parent_name.trim(),
-          age: editForm.age ? parseInt(editForm.age, 10) : null,
-          phone_number: editForm.phone_number.trim(),
-          address: editForm.address.trim()
-        })
+        .update(studentUpdatePayload)
         .eq("user_id", user.id);
 
-      if (studentError) throw studentError;
+      if (studentError) {
+        delete studentUpdatePayload.avatar_url;
+        await supabase
+          .from("students")
+          .update(studentUpdatePayload)
+          .eq("user_id", user.id);
+      }
 
       toast.success("Profil berhasil diperbarui!", { id: loadingToast });
       setIsEditModalOpen(false);
@@ -347,9 +482,21 @@ export default function Profile() {
             <ShieldCheck size={120} className="absolute -right-6 -top-6 text-white/5 rotate-12" />
             
             <div className="relative z-10 flex flex-col items-center text-center">
-              <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-lg mb-3 border border-white/10">
-                <span className="font-black text-lg">SB</span>
-              </div>
+              {/* Foto Profil Atlet atau Fallback SB Logo */}
+              {studentData.avatar_url ? (
+                <div className="w-16 h-16 rounded-2xl overflow-hidden border-2 border-white/20 shadow-lg mb-3 bg-slate-800">
+                  <img
+                    src={studentData.avatar_url}
+                    alt={studentData.users?.full_name || "Atlet"}
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+              ) : (
+                <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-lg mb-3 border border-white/10">
+                  <span className="font-black text-lg">SB</span>
+                </div>
+              )}
+
               <h2 className="text-white font-bold tracking-[0.2em] text-[10px] uppercase mb-3">
                 Siripbiru Swim Club
               </h2>
@@ -361,7 +508,7 @@ export default function Profile() {
                 {studentData.users?.email}
               </div>
               
-              {/* Status Kelas & Progres Pertemuan (Mengutamakan kelas aktif di atas kelas lulus) */}
+              {/* Status Kelas & Progres Pertemuan */}
               <div className="flex flex-wrap justify-center gap-1.5 max-w-xs">
                 {allEnrollments.length > 0 ? (
                   [...allEnrollments]
@@ -492,7 +639,7 @@ export default function Profile() {
         </button>
       </div>
 
-      {/* Modal Layar Penuh QR Code (Optimasi Pemindaian Cepat) */}
+      {/* Modal Layar Penuh QR Code */}
       {isFullscreenQrOpen && (
         <div className="fixed inset-0 z-50 flex flex-col items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-in fade-in duration-200">
           <div className="bg-white rounded-[2.5rem] p-8 max-w-sm w-full flex flex-col items-center text-center shadow-2xl relative">
@@ -542,6 +689,7 @@ export default function Profile() {
         </div>
       )}
 
+      {/* Modal Pengaturan Akun & Edit Profil */}
       {isEditModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200 max-h-[90vh] flex flex-col">
@@ -562,6 +710,55 @@ export default function Profile() {
             <div className="overflow-y-auto p-6 custom-scrollbar">
               <form id="editProfileForm" onSubmit={handleEditSubmit} className="space-y-6">
                 
+                {/* Bagian Foto Profil Atlet */}
+                <div className="flex flex-col items-center justify-center p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                  <div className="relative mb-3">
+                    <div className="w-24 h-24 rounded-2xl overflow-hidden bg-slate-200 border-2 border-white shadow-md flex items-center justify-center">
+                      {photoPreview ? (
+                        <img
+                          src={photoPreview}
+                          alt="Preview Avatar"
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <User size={36} className="text-slate-400" />
+                      )}
+                    </div>
+                    
+                    {/* Tombol Aksi Foto: Upload & Kosongkan */}
+                    <div className="absolute -bottom-2 -right-2 flex items-center gap-1">
+                      {photoPreview && (
+                        <button
+                          type="button"
+                          onClick={handleRemovePhoto}
+                          className="p-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl shadow-md transition-all active:scale-90"
+                          title="Kosongkan Foto Profil"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-md transition-all active:scale-90"
+                        title="Pilih Foto"
+                      >
+                        <Camera size={15} />
+                      </button>
+                    </div>
+                  </div>
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handlePhotoSelect}
+                    accept="image/*"
+                    className="hidden"
+                  />
+                  <div className="text-center">
+                    <p className="text-xs font-bold text-slate-700">Foto Profil Atlet</p>
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-2 gap-3 p-4 bg-slate-50 rounded-2xl border border-slate-100">
                   <div className="col-span-2">
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">NIS</label>

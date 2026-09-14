@@ -47,6 +47,13 @@ export default function CoachSchedule() {
     search: "",
   });
 
+  // State Modal Preview Foto Ukuran Penuh
+  const [imagePreviewModal, setImagePreviewModal] = useState({
+    isOpen: false,
+    url: "",
+    name: "",
+  });
+
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
@@ -124,24 +131,40 @@ export default function CoachSchedule() {
         return;
       }
 
-      // Ambil seluruh siswa aktif di kelas-kelas sesi ini
-      const { data, error } = await supabase
+      // Ambil seluruh siswa aktif di kelas-kelas sesi ini beserta avatar_url
+      let enrollRes = await supabase
         .from("student_enrollments")
         .select(`
           id, class_id, status,
           classes ( id, name ),
           students (
-            id, nis, parent_name, phone_number,
+            id, nis, parent_name, phone_number, avatar_url,
             users ( full_name )
           )
         `)
         .in("class_id", session.class_ids)
         .eq("status", "active");
 
-      if (error) throw error;
+      // Fallback jika tabel belum memiliki avatar_url
+      if (enrollRes.error) {
+        enrollRes = await supabase
+          .from("student_enrollments")
+          .select(`
+            id, class_id, status,
+            classes ( id, name ),
+            students (
+              id, nis, parent_name, phone_number,
+              users ( full_name )
+            )
+          `)
+          .in("class_id", session.class_ids)
+          .eq("status", "active");
+      }
+
+      if (enrollRes.error) throw enrollRes.error;
       setStudentsModal((prev) => ({
         ...prev,
-        students: data || [],
+        students: enrollRes.data || [],
         loading: false,
       }));
     } catch (err) {
@@ -221,13 +244,44 @@ export default function CoachSchedule() {
   return (
     <div className="min-h-screen bg-[#f8fafc] p-4 md:p-8 font-sans">
       <Toaster position="top-right" />
+
+      {/* Modal Pratinjau Foto Siswa Ukuran Penuh */}
+      {imagePreviewModal.isOpen && (
+        <div
+          onClick={() => setImagePreviewModal({ isOpen: false, url: "", name: "" })}
+          className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200 cursor-pointer"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-3xl overflow-hidden max-w-sm w-full p-4 shadow-2xl relative animate-in zoom-in-95 duration-200 flex flex-col items-center cursor-default"
+          >
+            <button
+              onClick={() => setImagePreviewModal({ isOpen: false, url: "", name: "" })}
+              className="absolute top-3 right-3 p-1.5 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 transition-colors"
+            >
+              <X size={18} />
+            </button>
+            <div className="w-56 h-56 rounded-2xl overflow-hidden bg-slate-100 mt-2 mb-3 border border-slate-200 shadow-inner">
+              <img
+                src={imagePreviewModal.url}
+                alt={imagePreviewModal.name}
+                className="w-full h-full object-cover"
+              />
+            </div>
+            <p className="font-bold text-slate-800 text-sm text-center truncate w-full px-2">
+              {imagePreviewModal.name}
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="max-w-7xl mx-auto mb-6">
         <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight flex items-center gap-3">
           <CalendarDays className="text-blue-600" size={28} />
           Jadwal Tugas Melatih
         </h1>
         <p className="text-slate-500 mt-1 text-sm">
-          Daftar sesi latihan renang yang ditugaskan khusus untuk Anda pantau.
+          Daftar sesi latihan renang yang ditugaskan khusus untuk Anda pantau[cite: 10].
         </p>
       </div>
 
@@ -430,7 +484,7 @@ export default function CoachSchedule() {
                     Daftar Murid: {studentsModal.session?.name}
                   </h3>
                   <p className="text-[11px] text-slate-500">
-                    Daftar siswa dan nomor kontak wali pada sesi ini
+                    Daftar siswa dan nomor kontak wali pada sesi ini[cite: 10]
                   </p>
                 </div>
               </div>
@@ -476,6 +530,8 @@ export default function CoachSchedule() {
                   const waUrl = cleanPhone
                     ? `https://wa.me/${cleanPhone.startsWith("0") ? "62" + cleanPhone.slice(1) : cleanPhone}`
                     : null;
+                  const studentAvatar = item.students?.avatar_url;
+                  const studentName = item.students?.users?.full_name || "Atlet";
 
                   return (
                     <div
@@ -483,12 +539,36 @@ export default function CoachSchedule() {
                       className="p-3 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                     >
                       <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-9 h-9 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center font-bold text-xs shrink-0 border border-blue-100">
-                          <User size={16} />
+                        {/* Foto Profil Student dengan Fitur Zoom Preview */}
+                        <div
+                          onClick={() => {
+                            if (studentAvatar) {
+                              setImagePreviewModal({
+                                isOpen: true,
+                                url: studentAvatar,
+                                name: studentName,
+                              });
+                            }
+                          }}
+                          className={`w-10 h-10 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center font-bold text-xs shrink-0 border border-blue-100 overflow-hidden ${
+                            studentAvatar ? "cursor-pointer hover:opacity-85 transition-opacity" : ""
+                          }`}
+                          title={studentAvatar ? "Klik untuk memperbesar foto" : undefined}
+                        >
+                          {studentAvatar ? (
+                            <img
+                              src={studentAvatar}
+                              alt={studentName}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <User size={16} />
+                          )}
                         </div>
+
                         <div className="min-w-0">
                           <h4 className="font-bold text-slate-800 text-xs truncate">
-                            {item.students?.users?.full_name || "Atlet"}
+                            {studentName}
                           </h4>
                           <div className="flex items-center gap-2 text-[10px] text-slate-500 mt-0.5">
                             <span className="font-mono font-semibold text-blue-600">

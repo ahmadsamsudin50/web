@@ -14,6 +14,7 @@ import {
   Tag,
   Bookmark,
   Users,
+  Clock,
 } from "lucide-react";
 import { supabase } from "../../utils/supabaseClient";
 
@@ -27,6 +28,30 @@ const CATEGORIES = [
   { key: "intensif", label: "Intensif" },
 ];
 
+// Helper mengubah schedule_info (baik JSONB Objek maupun String) menjadi teks yang aman dirender
+const formatScheduleText = (schedule) => {
+  if (!schedule) return null;
+
+  if (typeof schedule === "object") {
+    const days = Array.isArray(schedule.days) ? schedule.days.filter(Boolean) : [];
+    const startTime = schedule.start_time || "";
+    const endTime = schedule.end_time || "";
+
+    if (days.length === 0 && !startTime && !endTime) return null;
+
+    const daysText = days.length > 0 ? days.join(", ") : "Hari Fleksibel";
+    const timeText = startTime && endTime ? `${startTime} - ${endTime} WIB` : startTime ? `${startTime} WIB` : "";
+
+    return timeText ? `${daysText} | ${timeText}` : daysText;
+  }
+
+  if (typeof schedule === "string") {
+    return schedule.trim() ? schedule.trim() : null;
+  }
+
+  return null;
+};
+
 export default function Course() {
   const [courses, setCourses] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -39,12 +64,13 @@ export default function Course() {
     let mounted = true;
     const fetchEnrichedClasses = async () => {
       try {
-        // Ambil data classes, enrollments, dan landing_courses secara paralel
+        let classQuery = supabase
+          .from("classes")
+          .select("id, name, category, price, max_sessions, max_capacity, schedule_info, created_at")
+          .order("created_at", { ascending: true });
+
         const [classRes, enrollRes, landingRes] = await Promise.all([
-          supabase
-            .from("classes")
-            .select("id, name, category, price, max_sessions, max_capacity, created_at")
-            .order("created_at", { ascending: true }),
+          classQuery,
           supabase
             .from("student_enrollments")
             .select("class_id")
@@ -54,14 +80,21 @@ export default function Course() {
             .select("title, description, features, icon_name"),
         ]);
 
-        if (classRes.error) throw classRes.error;
+        let classData = classRes.data;
+        if (classRes.error) {
+          const fallbackClassRes = await supabase
+            .from("classes")
+            .select("id, name, category, price, max_sessions, max_capacity, created_at")
+            .order("created_at", { ascending: true });
+          if (fallbackClassRes.error) throw fallbackClassRes.error;
+          classData = fallbackClassRes.data;
+        }
 
         const countMap = {};
         (enrollRes.data || []).forEach((item) => {
           countMap[item.class_id] = (countMap[item.class_id] || 0) + 1;
         });
 
-        // Buat lookup dictionary untuk deskripsi dari landing_courses
         const landingMap = {};
         (landingRes.data || []).forEach((item) => {
           if (item.title) {
@@ -69,12 +102,10 @@ export default function Course() {
           }
         });
 
-        const formatted = (classRes.data || []).map((c) => {
+        const formatted = (classData || []).map((c) => {
           const maxCap = Number(c.max_capacity) || 20;
           const enrolled = Number(countMap[c.id]) || 0;
           const remaining = Math.max(0, maxCap - enrolled);
-
-          // Ambil rincian dari landing_courses bila ada yang cocok dengan nama kelas
           const matchedLanding = landingMap[c.name.trim().toLowerCase()];
 
           return {
@@ -87,7 +118,7 @@ export default function Course() {
             enrolled_count: enrolled,
             remaining_seats: remaining,
             is_full: remaining <= 0,
-            // Deskripsi dari landing_courses (dengan fallback)
+            schedule_info: formatScheduleText(c.schedule_info),
             description:
               matchedLanding?.description ||
               `Program latihan renang ${c.name} dengan kurikulum terstruktur dan pendampingan pelatih berpengalaman.`,
@@ -218,11 +249,10 @@ export default function Course() {
             Pilihan Kelas <span className="text-cyan-400">Renang Terbaik</span>
           </h3>
           <p className="text-slate-400 text-sm md:text-base mt-3 font-medium leading-relaxed">
-            Kurikulum bertingkat yang dirancang terstruktur dari pengenalan air hingga persiapan kejuaraan profesional.
+            Kurikulum bertingkat yang dirancang terstruktur dari pengenalan air hingga persiapan kejuaraan profesional[cite: 18].
           </p>
         </div>
 
-        {/* Tab Filter Kategori */}
         <div className="flex flex-wrap justify-center gap-2 mb-8">
           {CATEGORIES.map((tab) => (
             <button
@@ -239,7 +269,6 @@ export default function Course() {
           ))}
         </div>
 
-        {/* Input Pencarian */}
         <div className="max-w-md mx-auto mb-14">
           <div className="relative flex items-center">
             <Search size={18} className="absolute left-4 text-cyan-400 pointer-events-none" />
@@ -300,7 +329,6 @@ export default function Course() {
                   )}
 
                   <div>
-                    {/* Header Kartu */}
                     <div className="flex items-center justify-between gap-4 mb-5">
                       <div
                         className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-colors ${
@@ -321,7 +349,6 @@ export default function Course() {
                       </div>
                     </div>
 
-                    {/* Tag Kategori */}
                     <div className="mb-3">
                       <span
                         className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black tracking-wider uppercase border backdrop-blur-sm ${getCategoryBadgeClass(
@@ -344,7 +371,6 @@ export default function Course() {
 
                     <div className="h-px bg-white/10 my-6"></div>
 
-                    {/* Fasilitas & Target Pertemuan */}
                     <div className="space-y-3 mb-8">
                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                         Fasilitas & Ketentuan:
@@ -357,7 +383,18 @@ export default function Course() {
                           <span>Target Pertemuan: <b>{c.max_sessions} Sesi Latihan</b></span>
                         </li>
 
-                        {/* Tampilkan fitur kustom dari landing_courses jika ada */}
+                        {/* Jadwal Latihan yang Sudah Diformat Aman */}
+                        {c.schedule_info && (
+                          <li className="flex items-center gap-2.5">
+                            <div className="w-4 h-4 rounded-full bg-emerald-400/20 text-emerald-300 flex items-center justify-center shrink-0">
+                              <Clock size={11} strokeWidth={3} />
+                            </div>
+                            <span className="text-emerald-300 font-medium">
+                              Jadwal: <b>{c.schedule_info}</b>
+                            </span>
+                          </li>
+                        )}
+
                         {c.features && c.features.length > 0 ? (
                           c.features.slice(0, 2).map((feat, fIdx) => (
                             <li key={fIdx} className="flex items-center gap-2.5">

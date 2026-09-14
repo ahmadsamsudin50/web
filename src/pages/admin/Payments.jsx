@@ -18,6 +18,8 @@ import {
   ZoomOut,
   RotateCw,
   RotateCcw,
+  User,
+  Wallet,
 } from "lucide-react";
 
 function CustomConfirmModal({
@@ -187,8 +189,14 @@ export default function Payments() {
     return payments.filter((p) => {
       const studentName = p.students?.users?.full_name?.toLowerCase() || "";
       const className = p.classes?.name?.toLowerCase() || "";
+      const senderName = (p.sender_name || "").toLowerCase();
+      const senderBank = (p.sender_bank || "").toLowerCase();
       const query = searchQuery.toLowerCase();
-      const matchesSearch = studentName.includes(query) || className.includes(query);
+      const matchesSearch =
+        studentName.includes(query) ||
+        className.includes(query) ||
+        senderName.includes(query) ||
+        senderBank.includes(query);
 
       let matchesStatus = true;
       if (filterStatus === "bundling") {
@@ -271,7 +279,6 @@ export default function Payments() {
 
   // Helper eksekusi persetujuan atomik (P2 & P3)
   const processApproval = async (paymentItem, adminId) => {
-    // 1. Coba panggil RPC PostgreSQL atomik jika fungsi SQL telah dibuat
     const { error: rpcError } = await supabase.rpc("approve_student_payment", {
       p_payment_id: paymentItem.id,
       p_admin_id: adminId || null,
@@ -279,7 +286,6 @@ export default function Payments() {
 
     if (!rpcError) return;
 
-    // 2. Mekanisme Fallback sisi klien jika RPC belum dibuat
     const { data: existingActive } = await supabase
       .from("student_enrollments")
       .select("id")
@@ -390,7 +396,6 @@ export default function Payments() {
 
       if (error) throw error;
 
-      // P4: Hapus berkas struk jika tidak terpakai oleh transaksi lain
       await deleteReceiptFileIfOrphan(selectedPayment.receipt_url, [selectedPayment.id]);
 
       toast.success("Pengajuan pembayaran berhasil ditolak.", { id: loadingToast });
@@ -536,7 +541,6 @@ export default function Payments() {
           )}
         </button>
 
-        {/* Filter Cepat Paket Bundling */}
         <button
           onClick={() => {
             setFilterStatus("bundling");
@@ -617,7 +621,7 @@ export default function Payments() {
           <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
-            placeholder="Cari nama atlet atau kelas..."
+            placeholder="Cari nama atlet, kelas, nama pengirim, atau bank..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm outline-none focus:ring-2 focus:ring-blue-500 font-medium"
@@ -637,7 +641,7 @@ export default function Payments() {
 
       <div className="max-w-7xl mx-auto">
         <div className="hidden md:block bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-          <table className="w-full text-left border-collapse min-w-[750px]">
+          <table className="w-full text-left border-collapse min-w-[850px]">
             <thead>
               <tr className="bg-slate-50 text-slate-400 text-[10px] uppercase tracking-wider font-bold border-b border-slate-100">
                 <th className="px-4 py-4 w-10 text-center">
@@ -655,6 +659,7 @@ export default function Payments() {
                   </button>
                 </th>
                 <th className="px-6 py-4">Informasi Transaksi</th>
+                <th className="px-6 py-4">Pengirim & Rekening Asal</th>
                 <th className="px-6 py-4">Data Atlet</th>
                 <th className="px-6 py-4">Kelas Tujuan</th>
                 <th className="px-6 py-4 text-center">Status</th>
@@ -707,6 +712,27 @@ export default function Payments() {
                         </span>
                       )}
                     </td>
+
+                    {/* Kolom Informasi Rekening & Bank Asal */}
+                    <td className="px-6 py-4">
+                      {p.sender_name || p.sender_bank ? (
+                        <div className="space-y-1">
+                          <div className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                            <User size={13} className="text-blue-500 shrink-0" />
+                            <span className="truncate">{p.sender_name || "-"}</span>
+                          </div>
+                          <div className="text-[11px] text-slate-500 font-medium flex items-center gap-1.5">
+                            <Wallet size={13} className="text-emerald-500 shrink-0" />
+                            <span className="bg-slate-100 border border-slate-200 px-1.5 py-0.2 rounded text-[10px] font-semibold text-slate-700">
+                              {p.sender_bank || "-"}
+                            </span>
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-[11px] text-slate-400 italic">Belum diisi</span>
+                      )}
+                    </td>
+
                     <td className="px-6 py-4">
                       <div className="font-bold text-slate-800 text-sm">{p.students?.users?.full_name || "Atlet"}</div>
                       <div className="text-xs text-slate-500">NIS: {p.students?.nis}</div>
@@ -773,6 +799,20 @@ export default function Payments() {
                   </div>
                   {getStatusBadge(p.status)}
                 </div>
+
+                {/* Detail Pengirim pada Mobile */}
+                {(p.sender_name || p.sender_bank) && (
+                  <div className="p-2.5 bg-slate-50 border border-slate-100 rounded-xl text-xs space-y-1">
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-slate-400">A.N Pengirim:</span>
+                      <span className="font-bold text-slate-700">{p.sender_name || "-"}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-slate-400">Bank / E-Wallet:</span>
+                      <span className="font-semibold text-blue-600">{p.sender_bank || "-"}</span>
+                    </div>
+                  </div>
+                )}
 
                 <div className="flex justify-between items-center text-xs text-slate-600 pt-2 border-t border-slate-100">
                   <span>{p.classes?.name}</span>
@@ -909,6 +949,16 @@ export default function Payments() {
                 <span className="font-bold text-slate-800">{selectedPayment.students?.users?.full_name}</span>
               </div>
 
+              {/* Rincian Nama Pengirim dan Bank Asal Pada Modal */}
+              <div className="flex justify-between pt-1 border-t border-slate-200/60">
+                <span className="text-slate-500">Pemilik Rekening (A.N):</span>
+                <span className="font-bold text-blue-700">{selectedPayment.sender_name || "-"}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Bank / E-Wallet Asal:</span>
+                <span className="font-bold text-emerald-700">{selectedPayment.sender_bank || "-"}</span>
+              </div>
+
               {relatedPayments.length > 1 ? (
                 <div className="pt-2 border-t border-slate-200 space-y-1.5">
                   <span className="font-bold text-slate-600 block mb-1">Rincian Paket Kelas Terkait:</span>
@@ -926,7 +976,7 @@ export default function Payments() {
                   </div>
                 </div>
               ) : (
-                <div className="space-y-1.5">
+                <div className="space-y-1.5 pt-1 border-t border-slate-200/60">
                   <div className="flex justify-between">
                     <span className="text-slate-500">Kelas:</span>
                     <span className="font-bold text-slate-800">{selectedPayment.classes?.name}</span>

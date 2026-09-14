@@ -17,6 +17,8 @@ import {
   Square,
   Layers,
   AlertTriangle,
+  User,
+  Wallet,
 } from "lucide-react";
 
 // Helper kompresi gambar sisi klien menggunakan HTML5 Canvas
@@ -83,6 +85,10 @@ export default function Enrollment() {
   const [previewUrl, setPreviewUrl] = useState(null);
   const fileInputRef = useRef(null);
 
+  // State untuk inputan detail pelacakan pengirim
+  const [senderName, setSenderName] = useState("");
+  const [senderBank, setSenderBank] = useState("");
+
   const BANK_INFO = {
     bank: "BCA",
     accountNumber: "7112175957",
@@ -106,17 +112,31 @@ export default function Enrollment() {
       if (studentError || !student) throw new Error("Data atlet tidak ditemukan.");
       setStudentId(student.id);
 
-      // 2. Ambil riwayat pembayaran atlet
-      const { data: paymentData, error: payError } = await supabase
+      // 2. Ambil riwayat pembayaran atlet beserta sender_name dan sender_bank
+      let { data: paymentData, error: payError } = await supabase
         .from("payments")
         .select(`
           id, class_id, amount, status, reject_reason, created_at, receipt_url,
+          sender_name, sender_bank,
           classes ( name, category )
         `)
         .eq("student_id", student.id)
         .order("created_at", { ascending: false });
 
-      if (payError) throw payError;
+      // Fallback jika kolom baru belum dibuat di PostgreSQL Supabase
+      if (payError) {
+        const fallback = await supabase
+          .from("payments")
+          .select(`
+            id, class_id, amount, status, reject_reason, created_at, receipt_url,
+            classes ( name, category )
+          `)
+          .eq("student_id", student.id)
+          .order("created_at", { ascending: false });
+
+        paymentData = fallback.data;
+      }
+
       setPayments(paymentData || []);
 
       // 3. Ambil pendaftaran kelas yang sedang AKTIF (status = 'active')
@@ -133,8 +153,6 @@ export default function Enrollment() {
         ?.filter((p) => p.status === "pending")
         .map((p) => p.class_id) || [];
 
-      // P2 & P3: Kelas yang sedang aktif atau menunggu konfirmasi dikecualikan.
-      // Kelas yang statusnya 'completed' tetap bisa didaftarkan ulang.
       const excludedClassIds = [...new Set([...activeClassIds, ...pendingPayIds])];
 
       // 4. Ambil data kelas dan hitung sisa kapasitas kuota aktif
@@ -245,6 +263,12 @@ export default function Enrollment() {
     if (!file) {
       return toast.error("Silakan unggah bukti transfer pembayaran.");
     }
+    if (!senderName.trim()) {
+      return toast.error("Silakan masukkan nama pemilik rekening pengirim.");
+    }
+    if (!senderBank.trim()) {
+      return toast.error("Silakan masukkan nama bank atau e-wallet asal.");
+    }
 
     setSubmitting(true);
     const loadingToast = toast.loading(`Mengunggah pembayaran untuk ${selectedClassIds.length} kelas...`);
@@ -272,10 +296,24 @@ export default function Enrollment() {
         amount: c.price,
         receipt_url: receiptUrl,
         status: "pending",
+        sender_name: senderName.trim(),
+        sender_bank: senderBank.trim(),
       }));
 
       const { error: insertError } = await supabase.from("payments").insert(paymentBatch);
-      if (insertError) throw insertError;
+
+      // Fallback jika database belum ada kolom sender_name/sender_bank
+      if (insertError) {
+        const fallbackBatch = selectedClasses.map((c) => ({
+          student_id: studentId,
+          class_id: c.id,
+          amount: c.price,
+          receipt_url: receiptUrl,
+          status: "pending",
+        }));
+        const { error: fallbackError } = await supabase.from("payments").insert(fallbackBatch);
+        if (fallbackError) throw fallbackError;
+      }
 
       toast.success(
         `Pengajuan untuk ${selectedClassIds.length} kelas berhasil! Menunggu verifikasi admin.`,
@@ -283,10 +321,11 @@ export default function Enrollment() {
       );
 
       setSelectedClassIds([]);
+      setSenderName("");
+      setSenderBank("");
       clearFile();
       loadData();
     } catch (error) {
-      // Rollback file bukti jika insert database gagal (P4)
       if (uploadedReceiptPath) {
         await supabase.storage.from("images").remove([uploadedReceiptPath]);
       }
@@ -345,7 +384,7 @@ export default function Enrollment() {
           Pendaftaran Kelas
         </h1>
         <p className="text-slate-500 mt-1 text-sm">
-          Pilih satu atau beberapa kelas latihan renang dan kirim konfirmasi transfer sekaligus.
+          Pilih satu atau beberapa kelas latihan renang dan kirim konfirmasi transfer sekaligus[cite: 12].
         </p>
       </div>
 
@@ -444,7 +483,6 @@ export default function Enrollment() {
                             <div className="flex items-center justify-between text-[10px] text-slate-400 mt-1">
                               <span className="uppercase font-semibold">{c.category || "Umum"}</span>
 
-                              {/* Indikator Kuota Kritis */}
                               {c.is_full ? (
                                 <span className="font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-md border border-rose-200">
                                   Penuh
@@ -498,6 +536,43 @@ export default function Enrollment() {
                   </div>
                 </div>
               )}
+
+              {/* Input Detail Pengirim Transfer */}
+              <div className="space-y-3 pt-1">
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">
+                    Nama Pemilik Rekening Pengirim
+                  </label>
+                  <div className="relative">
+                    <User size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="text"
+                      required
+                      value={senderName}
+                      onChange={(e) => setSenderName(e.target.value)}
+                      placeholder="Contoh: Budi Santoso (a.n Rekening)"
+                      className="w-full pl-10 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500 font-medium text-slate-700"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">
+                    Bank / E-Wallet Pengirim
+                  </label>
+                  <div className="relative">
+                    <Wallet size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="text"
+                      required
+                      value={senderBank}
+                      onChange={(e) => setSenderBank(e.target.value)}
+                      placeholder="Contoh: BCA / Mandiri / GoPay / Dana"
+                      className="w-full pl-10 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500 font-medium text-slate-700"
+                    />
+                  </div>
+                </div>
+              </div>
 
               <div>
                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">
@@ -581,6 +656,18 @@ export default function Enrollment() {
                       <div>
                         <h3 className="font-bold text-slate-800 text-sm">{p.classes?.name}</h3>
                         <p className="text-xs text-slate-400 mt-0.5">{dateStr}</p>
+                        
+                        {/* Rincian Nama Pengirim & Bank/E-Wallet */}
+                        {(p.sender_name || p.sender_bank) && (
+                          <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-slate-500 font-medium">
+                            <span className="bg-blue-50 text-blue-700 border border-blue-100 px-2 py-0.5 rounded-md">
+                              Pengirim: <b>{p.sender_name || "-"}</b>
+                            </span>
+                            <span className="bg-slate-200/70 text-slate-700 px-2 py-0.5 rounded-md">
+                              Via: <b>{p.sender_bank || "-"}</b>
+                            </span>
+                          </div>
+                        )}
                       </div>
                       <div className="text-right">
                         <div className="font-black text-slate-800 text-sm">{formatRupiah(p.amount)}</div>
@@ -611,7 +698,7 @@ export default function Enrollment() {
               {payments.length === 0 && (
                 <div className="text-center py-12 text-slate-400">
                   <p className="text-sm font-bold text-slate-600">Belum ada riwayat pembayaran</p>
-                  <p className="text-xs mt-1">Pilih satu atau beberapa kelas untuk memulai pendaftaran.</p>
+                  <p className="text-xs mt-1">Pilih satu atau beberapa kelas untuk memulai pendaftaran[cite: 12].</p>
                 </div>
               )}
             </div>

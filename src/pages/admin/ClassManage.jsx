@@ -18,6 +18,7 @@ import {
   CheckCircle2,
   Clock,
   User,
+  Calendar,
 } from "lucide-react";
 
 const CATEGORY_OPTIONS = [
@@ -26,6 +27,74 @@ const CATEGORY_OPTIONS = [
   { value: "profesional", label: "Profesional" },
   { value: "intensif", label: "Intensif" },
 ];
+
+const DAYS_OF_WEEK = [
+  "Senin",
+  "Selasa",
+  "Rabu",
+  "Kamis",
+  "Jumat",
+  "Sabtu",
+  "Minggu",
+];
+
+// Helper parsing schedule_info yang aman (Objek JSONB maupun String fallback)
+const parseScheduleInfo = (scheduleData) => {
+  if (!scheduleData) return { days: [], startTime: "", endTime: "" };
+
+  if (typeof scheduleData === "object") {
+    return {
+      days: Array.isArray(scheduleData.days) ? scheduleData.days : [],
+      startTime: scheduleData.start_time || "",
+      endTime: scheduleData.end_time || "",
+    };
+  }
+
+  if (typeof scheduleData === "string") {
+    try {
+      const [daysPart, timesPart] = scheduleData.split("|").map((s) => s.trim());
+      const days = daysPart ? daysPart.split(",").map((d) => d.trim()).filter(Boolean) : [];
+      let startTime = "";
+      let endTime = "";
+      if (timesPart) {
+        const cleanTimes = timesPart.replace("WIB", "").trim();
+        const [start, end] = cleanTimes.split("-").map((t) => t.trim());
+        startTime = start || "";
+        endTime = end || "";
+      }
+      return { days, startTime, endTime };
+    } catch {
+      return { days: [], startTime: "", endTime: "" };
+    }
+  }
+
+  return { days: [], startTime: "", endTime: "" };
+};
+
+// Helper menampilkan teks jadwal string di tabel tanpa pernah merender object mentah
+const getDisplayScheduleText = (schedule) => {
+  if (!schedule) return null;
+
+  if (typeof schedule === "object") {
+    const days = Array.isArray(schedule.days) ? schedule.days.filter(Boolean) : [];
+    const startTime = schedule.start_time || "";
+    const endTime = schedule.end_time || "";
+
+    if (days.length === 0 && !startTime && !endTime) return null;
+
+    const daysText = days.length > 0 ? days.join(", ") : "Hari Fleksibel";
+    const timeText =
+      startTime && endTime ? `${startTime} - ${endTime} WIB` : startTime ? `${startTime} WIB` : "";
+
+    return timeText ? `${daysText} | ${timeText}` : daysText;
+  }
+
+  if (typeof schedule === "string") {
+    return schedule.trim() || null;
+  }
+
+  return null;
+};
 
 function ConfirmModal({
   isOpen,
@@ -86,20 +155,24 @@ export default function ClassManage() {
   const [originalName, setOriginalName] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [filterCategory, setFilterCategory] = useState("all");
+
   const [form, setForm] = useState({
     name: "",
     category: "anak-anak",
     max_sessions: 12,
     price: 0,
     max_capacity: 20,
+    schedule_days: [],
+    schedule_start_time: "",
+    schedule_end_time: "",
   });
+
   const [confirmModal, setConfirmModal] = useState({
     open: false,
     id: null,
     name: "",
   });
 
-  // State Modal Detail Murid Terdaftar
   const [studentsModal, setStudentsModal] = useState({
     isOpen: false,
     classData: null,
@@ -108,19 +181,35 @@ export default function ClassManage() {
     search: "",
   });
 
+  const [imagePreviewModal, setImagePreviewModal] = useState({
+    isOpen: false,
+    url: null,
+    name: "",
+  });
+
   const fetchClasses = async () => {
     setLoading(true);
     try {
-      const [classRes, enrollRes] = await Promise.all([
-        supabase
+      let classRes = await supabase
+        .from("classes")
+        .select(
+          "id, name, category, price, max_sessions, max_capacity, schedule_info, created_at"
+        )
+        .order("created_at", { ascending: false });
+
+      if (classRes.error) {
+        classRes = await supabase
           .from("classes")
-          .select("id, name, category, price, max_sessions, max_capacity, created_at")
-          .order("created_at", { ascending: false }),
-        supabase
-          .from("student_enrollments")
-          .select("class_id")
-          .eq("status", "active"), // SINKRONISASI KUOTA (P2): Hanya hitung atlet berstatus active
-      ]);
+          .select(
+            "id, name, category, price, max_sessions, max_capacity, created_at"
+          )
+          .order("created_at", { ascending: false });
+      }
+
+      const enrollRes = await supabase
+        .from("student_enrollments")
+        .select("class_id")
+        .eq("status", "active");
 
       if (classRes.error) throw classRes.error;
       if (enrollRes.error) throw enrollRes.error;
@@ -147,7 +236,6 @@ export default function ClassManage() {
     fetchClasses();
   }, []);
 
-  // Membuka modal daftar murid di kelas yang dipilih tanpa menggunakan created_at
   const openStudentsListModal = async (c) => {
     setStudentsModal({
       isOpen: true,
@@ -158,20 +246,30 @@ export default function ClassManage() {
     });
 
     try {
-      const [enrollRes, logsRes] = await Promise.all([
-        supabase
+      let enrollRes = await supabase
+        .from("student_enrollments")
+        .select(`
+          id, status, completed_at,
+          students ( id, nis, parent_name, phone_number, avatar_url, users ( full_name, email ) )
+        `)
+        .eq("class_id", c.id)
+        .order("id", { ascending: false });
+
+      if (enrollRes.error) {
+        enrollRes = await supabase
           .from("student_enrollments")
           .select(`
             id, status, completed_at,
             students ( id, nis, parent_name, phone_number, users ( full_name, email ) )
           `)
           .eq("class_id", c.id)
-          .order("id", { ascending: false }),
-        supabase
-          .from("attendance_logs")
-          .select("enrollment_id")
-          .in("status", ["hadir_qr", "hadir_manual"]),
-      ]);
+          .order("id", { ascending: false });
+      }
+
+      const logsRes = await supabase
+        .from("attendance_logs")
+        .select("enrollment_id")
+        .in("status", ["hadir_qr", "hadir_manual"]);
 
       if (enrollRes.error) throw enrollRes.error;
 
@@ -205,6 +303,9 @@ export default function ClassManage() {
       max_sessions: 12,
       price: 0,
       max_capacity: 20,
+      schedule_days: [],
+      schedule_start_time: "",
+      schedule_end_time: "",
     });
     setIsEditing(false);
     setCurrentId(null);
@@ -213,17 +314,31 @@ export default function ClassManage() {
   };
 
   const openEditModal = (c) => {
+    const parsed = parseScheduleInfo(c.schedule_info);
     setForm({
       name: c.name || "",
       category: c.category || "anak-anak",
       max_sessions: c.max_sessions ?? 12,
       price: c.price !== null && c.price !== undefined ? Number(c.price) : 0,
       max_capacity: c.max_capacity ?? 20,
+      schedule_days: parsed.days,
+      schedule_start_time: parsed.startTime,
+      schedule_end_time: parsed.endTime,
     });
     setIsEditing(true);
     setCurrentId(c.id);
     setOriginalName(c.name || "");
     setIsModalOpen(true);
+  };
+
+  const toggleDaySelection = (day) => {
+    setForm((prev) => {
+      const exists = prev.schedule_days.includes(day);
+      const updatedDays = exists
+        ? prev.schedule_days.filter((d) => d !== day)
+        : [...prev.schedule_days, day];
+      return { ...prev, schedule_days: updatedDays };
+    });
   };
 
   const handleSubmit = async (e) => {
@@ -235,7 +350,6 @@ export default function ClassManage() {
       return;
     }
 
-    // P3: Validasi nama kelas duplikat
     const isDuplicate = classes.some(
       (c) => c.name.toLowerCase() === cleanName.toLowerCase() && c.id !== currentId
     );
@@ -250,12 +364,21 @@ export default function ClassManage() {
 
     const rawPrice = String(form.price).replace(/[^0-9]/g, "");
     const parsedPrice = rawPrice === "" ? 0 : parseFloat(rawPrice);
+
+    // Siapkan struktur payload JSONB yang sesuai dengan skema tabel PostgreSQL
+    const schedulePayload = {
+      days: form.schedule_days,
+      start_time: form.schedule_start_time || "",
+      end_time: form.schedule_end_time || "",
+    };
+
     const payload = {
       name: cleanName,
       category: form.category,
       max_sessions: parseInt(form.max_sessions, 10) || 12,
       price: isNaN(parsedPrice) ? 0 : parsedPrice,
       max_capacity: parseInt(form.max_capacity, 10) || 20,
+      schedule_info: schedulePayload,
     };
 
     try {
@@ -266,18 +389,29 @@ export default function ClassManage() {
       }).format(parsedPrice);
 
       if (isEditing) {
-        const { data, error } = await supabase
+        let { data, error } = await supabase
           .from("classes")
           .update(payload)
           .eq("id", currentId)
           .select();
+
+        // Fallback jika database belum ada kolom schedule_info
+        if (error) {
+          delete payload.schedule_info;
+          const fallbackUpdate = await supabase
+            .from("classes")
+            .update(payload)
+            .eq("id", currentId)
+            .select();
+          data = fallbackUpdate.data;
+          error = fallbackUpdate.error;
+        }
 
         if (error) throw error;
         if (!data || data.length === 0) {
           throw new Error("Tidak ada baris yang diperbarui. Periksa izin RLS pada tabel classes.");
         }
 
-        // P3: Sinkronkan ke landing_courses (cari berdasarkan originalName atau nama baru)
         const { data: matchedLanding } = await supabase
           .from("landing_courses")
           .select("id")
@@ -296,17 +430,26 @@ export default function ClassManage() {
 
         toast.success("Kelas berhasil diperbarui!", { id: loadingToast });
       } else {
-        const { data, error } = await supabase
+        let { data, error } = await supabase
           .from("classes")
           .insert([payload])
           .select();
+
+        if (error) {
+          delete payload.schedule_info;
+          const fallbackInsert = await supabase
+            .from("classes")
+            .insert([payload])
+            .select();
+          data = fallbackInsert.data;
+          error = fallbackInsert.error;
+        }
 
         if (error) throw error;
         if (!data || data.length === 0) {
           throw new Error("Gagal menambahkan data. Periksa izin RLS pada tabel classes.");
         }
 
-        // P3: Otomatis tambahkan entri display dasar di landing_courses jika belum ada
         const { data: existingLanding } = await supabase
           .from("landing_courses")
           .select("id")
@@ -320,7 +463,10 @@ export default function ClassManage() {
               price: `${formatRupiahText} / Paket`,
               description: `Program latihan renang kategori ${form.category}.`,
               icon_name: "Droplets",
-              features: [`Maksimal ${payload.max_sessions} Sesi Pertemuan`, "Instruktur Bersertifikat"],
+              features: [
+                `Maksimal ${payload.max_sessions} Sesi Pertemuan`,
+                "Instruktur Bersertifikat",
+              ],
             },
           ]);
         }
@@ -346,7 +492,6 @@ export default function ClassManage() {
     setConfirmModal({ open: false, id: null, name: "" });
 
     try {
-      // 1. Cek pendaftaran aktif
       const { count: enrollCount, error: enrollErr } = await supabase
         .from("student_enrollments")
         .select("*", { count: "exact", head: true })
@@ -358,7 +503,6 @@ export default function ClassManage() {
         throw new Error(`Tidak dapat menghapus. Masih ada ${enrollCount} pendaftaran aktif di kelas ini.`);
       }
 
-      // 2. Cek transaksi pembayaran terkait
       const { count: payCount, error: payErr } = await supabase
         .from("payments")
         .select("*", { count: "exact", head: true })
@@ -369,7 +513,6 @@ export default function ClassManage() {
         throw new Error(`Tidak dapat menghapus. Terdapat ${payCount} catatan transaksi pembayaran untuk kelas ini.`);
       }
 
-      // 3. Bersihkan referensi class_id pada array sesi jadwal (P3)
       const { data: sessionsWithClass } = await supabase
         .from("sessions")
         .select("id, class_ids");
@@ -386,7 +529,6 @@ export default function ClassManage() {
         }
       }
 
-      // 4. Hapus baris kelas
       const { error: deleteErr } = await supabase
         .from("classes")
         .delete()
@@ -394,7 +536,6 @@ export default function ClassManage() {
 
       if (deleteErr) throw deleteErr;
 
-      // 5. Bersihkan data display di landing_courses agar tidak meninggalkan data yatim (P3)
       if (className) {
         await supabase
           .from("landing_courses")
@@ -438,7 +579,6 @@ export default function ClassManage() {
     return matchQuery && matchCat;
   });
 
-  // Filter pencarian murid di dalam modal
   const filteredStudentsInModal = studentsModal.studentsList.filter((item) => {
     const q = studentsModal.search.toLowerCase();
     const name = item.students?.users?.full_name?.toLowerCase() || "";
@@ -449,7 +589,10 @@ export default function ClassManage() {
 
   return (
     <div className="min-h-screen bg-[#f8fafc] p-4 md:p-8 font-sans relative">
-      <Toaster position="top-right" toastOptions={{ style: { borderRadius: "16px", fontWeight: "500" } }} />
+      <Toaster
+        position="top-right"
+        toastOptions={{ style: { borderRadius: "16px", fontWeight: "500" } }}
+      />
 
       <ConfirmModal
         isOpen={confirmModal.open}
@@ -465,11 +608,43 @@ export default function ClassManage() {
         confirmLabel="Ya, Hapus"
       />
 
+      {/* Modal Pratinjau Foto Siswa Ukuran Penuh (Hanya render jika URL valid, mencegah warning src="") */}
+      {imagePreviewModal.isOpen && imagePreviewModal.url && (
+        <div
+          onClick={() => setImagePreviewModal({ isOpen: false, url: null, name: "" })}
+          className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200 cursor-pointer"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-3xl overflow-hidden max-w-sm w-full p-4 shadow-2xl relative animate-in zoom-in-95 duration-200 flex flex-col items-center"
+          >
+            <button
+              onClick={() => setImagePreviewModal({ isOpen: false, url: null, name: "" })}
+              className="absolute top-3 right-3 p-1.5 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 transition-colors"
+            >
+              <X size={18} />
+            </button>
+            <div className="w-56 h-56 rounded-2xl overflow-hidden bg-slate-100 mt-2 mb-3 border border-slate-200 shadow-inner">
+              <img
+                src={imagePreviewModal.url}
+                alt={imagePreviewModal.name || "Foto Atlet"}
+                className="w-full h-full object-cover"
+              />
+            </div>
+            <p className="font-bold text-slate-800 text-sm text-center truncate w-full px-2">
+              {imagePreviewModal.name}
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="max-w-7xl mx-auto mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">Tingkat Kelas</h1>
+          <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">
+            Tingkat Kelas
+          </h1>
           <p className="text-slate-500 mt-1 text-sm">
-            Kelola kelompok latihan, kategori tingkatan, kuota kapasitas, dan biaya kursus.
+            Kelola kelompok latihan, kategori tingkatan, jadwal hari & jam, kuota kapasitas, dan biaya kursus.
           </p>
         </div>
         <button
@@ -540,6 +715,8 @@ export default function ClassManage() {
                   const enrolled = c.enrolled_count ?? 0;
                   const isFull = enrolled >= maxCap;
                   const percent = Math.min(Math.round((enrolled / maxCap) * 100), 100);
+                  const displaySchedule = getDisplayScheduleText(c.schedule_info);
+
                   return (
                     <tr key={c.id} className="hover:bg-blue-50/30 transition-colors">
                       <td className="px-8 py-5">
@@ -549,14 +726,26 @@ export default function ClassManage() {
                           </div>
                           <div>
                             <div className="font-bold text-slate-800 text-base">{c.name}</div>
-                            <div className="text-xs text-slate-400 mt-0.5 font-medium flex items-center gap-1.5">
-                              <Bookmark size={12} className="text-blue-500" /> Maks {c.max_sessions ?? 12} Sesi Pertemuan
+                            <div className="text-xs text-slate-400 mt-0.5 font-medium flex items-center gap-2 flex-wrap">
+                              <span className="flex items-center gap-1">
+                                <Bookmark size={12} className="text-blue-500" /> Maks {c.max_sessions ?? 12} Sesi Pertemuan
+                              </span>
+                              {displaySchedule && (
+                                <span className="flex items-center gap-1 text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md font-semibold text-[10px]">
+                                  <Clock size={11} />
+                                  {displaySchedule}
+                                </span>
+                              )}
                             </div>
                           </div>
                         </div>
                       </td>
                       <td className="px-6 py-5">
-                        <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${getCategoryBadge(c.category)}`}>
+                        <span
+                          className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${getCategoryBadge(
+                            c.category
+                          )}`}
+                        >
                           <Tag size={10} />
                           {CATEGORY_OPTIONS.find((opt) => opt.value === c.category)?.label || c.category}
                         </span>
@@ -587,7 +776,11 @@ export default function ClassManage() {
                           <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
                             <div
                               className={`h-full rounded-full transition-all duration-300 ${
-                                isFull ? "bg-rose-500" : percent > 80 ? "bg-amber-500" : "bg-blue-600"
+                                isFull
+                                  ? "bg-rose-500"
+                                  : percent > 80
+                                  ? "bg-amber-500"
+                                  : "bg-blue-600"
                               }`}
                               style={{ width: `${percent}%` }}
                             />
@@ -672,9 +865,7 @@ export default function ClassManage() {
                   type="text"
                   placeholder="Cari nama murid, NIS, atau nama wali..."
                   value={studentsModal.search}
-                  onChange={(e) =>
-                    setStudentsModal((prev) => ({ ...prev, search: e.target.value }))
-                  }
+                  onChange={(e) => setStudentsModal((prev) => ({ ...prev, search: e.target.value }))}
                   className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
                 />
               </div>
@@ -696,18 +887,44 @@ export default function ClassManage() {
                 filteredStudentsInModal.map((item) => {
                   const isCompleted = item.status === "completed";
                   const maxSessions = studentsModal.classData?.max_sessions || 12;
+                  const studentAvatar = item.students?.avatar_url;
+                  const studentName = item.students?.users?.full_name || "Tanpa Nama";
+
                   return (
                     <div
                       key={item.id}
                       className="p-3.5 bg-slate-50/80 hover:bg-slate-50 rounded-2xl border border-slate-200/80 flex items-center justify-between gap-3 transition-colors"
                     >
                       <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-9 h-9 rounded-full bg-white border border-slate-200 text-indigo-600 flex items-center justify-center font-bold text-xs shrink-0 shadow-2xs">
-                          <User size={16} />
+                        <div
+                          onClick={() => {
+                            if (studentAvatar) {
+                              setImagePreviewModal({
+                                isOpen: true,
+                                url: studentAvatar,
+                                name: studentName,
+                              });
+                            }
+                          }}
+                          className={`w-10 h-10 rounded-xl bg-white border border-slate-200 text-indigo-600 flex items-center justify-center font-bold text-xs shrink-0 shadow-2xs overflow-hidden ${
+                            studentAvatar ? "cursor-pointer hover:opacity-85 transition-opacity" : ""
+                          }`}
+                          title={studentAvatar ? "Klik untuk memperbesar foto" : undefined}
+                        >
+                          {studentAvatar ? (
+                            <img
+                              src={studentAvatar}
+                              alt={studentName}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <User size={18} />
+                          )}
                         </div>
+
                         <div className="min-w-0">
                           <h4 className="font-bold text-slate-800 text-xs truncate">
-                            {item.students?.users?.full_name || "Tanpa Nama"}
+                            {studentName}
                           </h4>
                           <div className="flex items-center gap-2 text-[10px] text-slate-400 mt-0.5">
                             <span className="font-mono font-semibold text-slate-600">
@@ -761,8 +978,8 @@ export default function ClassManage() {
 
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="px-8 py-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+          <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200 max-h-[90vh] flex flex-col">
+            <div className="px-8 py-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 shrink-0">
               <div className="flex items-center gap-3 text-blue-600">
                 {isEditing ? <Edit2 size={24} /> : <Plus size={24} />}
                 <h3 className="text-xl font-bold tracking-tight text-slate-800">
@@ -777,8 +994,8 @@ export default function ClassManage() {
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="p-8">
-              <div className="space-y-4 mb-8">
+            <form onSubmit={handleSubmit} className="p-8 overflow-y-auto custom-scrollbar flex-1">
+              <div className="space-y-4 mb-6">
                 <div className="space-y-1.5">
                   <label className="text-xs font-bold text-slate-400 uppercase tracking-wider ml-1">
                     Nama Kelas
@@ -808,6 +1025,63 @@ export default function ClassManage() {
                       </option>
                     ))}
                   </select>
+                </div>
+
+                {/* Input Pilihan Hari Latihan (Checkbox) */}
+                <div className="space-y-2 p-4 bg-slate-50 border border-slate-100 rounded-2xl">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                    <Calendar size={14} className="text-blue-600" />
+                    Pilihan Hari Latihan (Opsional)
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                    {DAYS_OF_WEEK.map((day) => {
+                      const isChecked = form.schedule_days.includes(day);
+                      return (
+                        <label
+                          key={day}
+                          className={`flex items-center gap-2 p-2 rounded-xl border text-xs font-semibold cursor-pointer transition-all ${
+                            isChecked
+                              ? "bg-blue-50 text-blue-700 border-blue-300 ring-1 ring-blue-300"
+                              : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100/60"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => toggleDaySelection(day)}
+                            className="w-3.5 h-3.5 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
+                          />
+                          <span>{day}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Input Jam Latihan (Input Time) */}
+                <div className="grid grid-cols-2 gap-3 p-4 bg-slate-50 border border-slate-100 rounded-2xl">
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
+                      <Clock size={13} className="text-blue-600" /> Jam Mulai
+                    </label>
+                    <input
+                      type="time"
+                      value={form.schedule_start_time}
+                      onChange={(e) => setForm({ ...form, schedule_start_time: e.target.value })}
+                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-xs text-slate-700 font-semibold outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
+                      <Clock size={13} className="text-blue-600" /> Jam Selesai
+                    </label>
+                    <input
+                      type="time"
+                      value={form.schedule_end_time}
+                      onChange={(e) => setForm({ ...form, schedule_end_time: e.target.value })}
+                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-xs text-slate-700 font-semibold outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">

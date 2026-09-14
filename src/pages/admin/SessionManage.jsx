@@ -20,6 +20,7 @@ import {
   Eye,
   Tag,
   Layers,
+  User,
 } from "lucide-react";
 
 function ConfirmModal({
@@ -138,6 +139,13 @@ export default function SessionManage() {
     coaches: [],
   });
   const [detailLoading, setDetailLoading] = useState(false);
+
+  // State Modal Preview Foto Ukuran Penuh
+  const [imagePreviewModal, setImagePreviewModal] = useState({
+    isOpen: false,
+    url: "",
+    name: "",
+  });
 
   const [confirmModal, setConfirmModal] = useState({
     isOpen: false,
@@ -325,19 +333,28 @@ export default function SessionManage() {
 
       let expectedStudents = [];
       if (s.class_ids && s.class_ids.length > 0) {
-        const { data: enrollData } = await supabase
+        let enrollQuery = await supabase
           .from("student_enrollments")
-          .select("id, student_id, class_id, classes(name, category, max_sessions), students(id, nis, users(full_name))")
+          .select("id, student_id, class_id, classes(name, category, max_sessions), students(id, nis, avatar_url, users(full_name))")
           .in("class_id", s.class_ids)
           .eq("status", "active");
 
-        if (enrollData) {
-          expectedStudents = enrollData
+        if (enrollQuery.error) {
+          enrollQuery = await supabase
+            .from("student_enrollments")
+            .select("id, student_id, class_id, classes(name, category, max_sessions), students(id, nis, users(full_name))")
+            .in("class_id", s.class_ids)
+            .eq("status", "active");
+        }
+
+        if (enrollQuery.data) {
+          expectedStudents = enrollQuery.data
             .filter((e) => e.students)
             .map((e) => ({
               id: e.students.id,
               enrollment_id: e.id,
               nis: e.students.nis,
+              avatar_url: e.students.avatar_url || null,
               users: e.students.users,
               classes: e.classes,
             }));
@@ -513,7 +530,6 @@ export default function SessionManage() {
     belum_absen: sessionDetails.students.filter((s) => s.status === "belum_absen").length,
   };
 
-  // Helper dictionary lookup untuk menampilkan tag kelas di tabel utama
   const classesLookup = {};
   classes.forEach((c) => {
     classesLookup[c.id] = c;
@@ -532,6 +548,36 @@ export default function SessionManage() {
         onConfirm={confirmModal.onConfirm}
         onCancel={closeConfirm}
       />
+
+      {/* Modal Pratinjau Foto Siswa Ukuran Penuh */}
+      {imagePreviewModal.isOpen && (
+        <div 
+          onClick={() => setImagePreviewModal({ isOpen: false, url: "", name: "" })}
+          className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200 cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-3xl overflow-hidden max-w-sm w-full p-4 shadow-2xl relative animate-in zoom-in-95 duration-200 flex flex-col items-center cursor-default"
+          >
+            <button
+              onClick={() => setImagePreviewModal({ isOpen: false, url: "", name: "" })}
+              className="absolute top-3 right-3 p-1.5 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 transition-colors"
+            >
+              <X size={18} />
+            </button>
+            <div className="w-56 h-56 rounded-2xl overflow-hidden bg-slate-100 mt-2 mb-3 border border-slate-200 shadow-inner">
+              <img
+                src={imagePreviewModal.url}
+                alt={imagePreviewModal.name}
+                className="w-full h-full object-cover"
+              />
+            </div>
+            <p className="font-bold text-slate-800 text-sm text-center truncate w-full px-2">
+              {imagePreviewModal.name}
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="max-w-7xl mx-auto mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
@@ -870,40 +916,76 @@ export default function SessionManage() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {sessionDetails.students.map((std, idx) => (
-                            <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                              <td className="px-4 py-3 font-medium text-slate-800">
-                                {std.users?.full_name}
-                                <div className="text-xs text-slate-400 font-mono mt-0.5">
-                                  {std.nis}
-                                </div>
-                              </td>
-                              <td className="px-4 py-3 text-slate-600 font-medium">
-                                <div className="flex items-center gap-1.5">
-                                  <span>{std.classes?.name}</span>
+                          {sessionDetails.students.map((std, idx) => {
+                            const studentAvatar = std.avatar_url;
+                            const studentName = std.users?.full_name || "Tanpa Nama";
+
+                            return (
+                              <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                                <td className="px-4 py-3 font-medium text-slate-800">
+                                  <div className="flex items-center gap-3">
+                                    <div
+                                      onClick={() => {
+                                        if (studentAvatar) {
+                                          setImagePreviewModal({
+                                            isOpen: true,
+                                            url: studentAvatar,
+                                            name: studentName,
+                                          });
+                                        }
+                                      }}
+                                      className={`w-9 h-9 rounded-xl bg-blue-50 border border-slate-200 text-blue-600 flex items-center justify-center font-bold text-xs shrink-0 overflow-hidden ${
+                                        studentAvatar ? "cursor-pointer hover:opacity-85 transition-opacity" : ""
+                                      }`}
+                                      title={studentAvatar ? "Klik untuk memperbesar foto" : undefined}
+                                    >
+                                      {studentAvatar ? (
+                                        <img
+                                          src={studentAvatar}
+                                          alt={studentName}
+                                          className="w-full h-full object-cover"
+                                        />
+                                      ) : (
+                                        <User size={16} />
+                                      )}
+                                    </div>
+                                    <div>
+                                      <div className="font-bold text-slate-800 text-sm">
+                                        {studentName}
+                                      </div>
+                                      <div className="text-xs text-slate-400 font-mono mt-0.5">
+                                        {std.nis}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3 text-slate-600 font-medium">
+                                  <div className="flex items-center gap-1.5">
+                                    <span>{std.classes?.name}</span>
+                                    <span
+                                      className={`text-[9px] font-black uppercase px-1.5 py-0.2 rounded border ${getCategoryBadgeStyle(
+                                        std.classes?.category,
+                                      )}`}
+                                    >
+                                      {std.classes?.category || "Umum"}
+                                    </span>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3 text-center text-slate-500 font-medium font-mono text-xs">
+                                  {formatTimeOnly(std.scanned_at)}
+                                </td>
+                                <td className="px-4 py-3 text-right">
                                   <span
-                                    className={`text-[9px] font-black uppercase px-1.5 py-0.2 rounded border ${getCategoryBadgeStyle(
-                                      std.classes?.category,
+                                    className={`inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border ${getStatusBadgeStyle(
+                                      std.status,
                                     )}`}
                                   >
-                                    {std.classes?.category || "Umum"}
+                                    {std.status.replace("_", " ")}
                                   </span>
-                                </div>
-                              </td>
-                              <td className="px-4 py-3 text-center text-slate-500 font-medium font-mono text-xs">
-                                {formatTimeOnly(std.scanned_at)}
-                              </td>
-                              <td className="px-4 py-3 text-right">
-                                <span
-                                  className={`inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border ${getStatusBadgeStyle(
-                                    std.status,
-                                  )}`}
-                                >
-                                  {std.status.replace("_", " ")}
-                                </span>
-                              </td>
-                            </tr>
-                          ))}
+                                </td>
+                              </tr>
+                            );
+                          })}
                           {sessionDetails.students.length === 0 && (
                             <tr>
                               <td

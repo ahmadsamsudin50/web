@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "../utils/supabaseClient";
 import { Link } from "react-router-dom";
 import { v4 as uuidv4 } from "uuid";
@@ -14,7 +14,57 @@ import {
   Loader2,
   CheckCircle2,
   Hash,
+  Camera,
+  Trash2,
 } from "lucide-react";
+
+// Helper: Kompresi gambar client-side menggunakan HTML5 Canvas
+const compressImage = (file, maxWidth = 600, maxHeight = 600, quality = 0.75) => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target.result;
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+
+        canvas.toBlob(
+          (blob) => {
+            if (blob) {
+              resolve(new File([blob], `${Date.now()}_avatar.webp`, { type: "image/webp" }));
+            } else {
+              resolve(file);
+            }
+          },
+          "image/webp",
+          quality
+        );
+      };
+      img.onerror = () => resolve(file);
+    };
+    reader.onerror = () => resolve(file);
+  });
+};
 
 export default function Register() {
   const [loading, setLoading] = useState(false);
@@ -22,6 +72,12 @@ export default function Register() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [registeredNis, setRegisteredNis] = useState("");
+  
+  // State Foto Profil (Opsional)
+  const [photoFile, setPhotoFile] = useState(null);
+  const [photoPreview, setPhotoPreview] = useState(null);
+  const fileInputRef = useRef(null);
+
   const [form, setForm] = useState({
     full_name: "",
     email: "",
@@ -37,14 +93,12 @@ export default function Register() {
   // Fungsi alokasi NIS otomatis dan aman (P3)
   const fetchAvailableNis = async () => {
     try {
-      // 1. Coba panggil RPC PostgreSQL jika function sequence sudah dibuat di Supabase
       const { data: rpcNis, error: rpcError } = await supabase.rpc("get_next_student_nis");
       if (!rpcError && rpcNis) {
         setForm((prev) => ({ ...prev, nis: String(rpcNis) }));
         return String(rpcNis);
       }
 
-      // 2. Mekanisme fallback client-side
       const { data, error } = await supabase.from("students").select("nis");
       if (error) throw error;
 
@@ -76,6 +130,34 @@ export default function Register() {
     setForm({ ...form, [e.target.name]: e.target.value });
   };
 
+  const handlePhotoSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      toast.error("Format file harus berupa gambar.");
+      return;
+    }
+
+    try {
+      const compressed = await compressImage(file, 600, 600, 0.75);
+      setPhotoFile(compressed);
+      setPhotoPreview(URL.createObjectURL(compressed));
+      toast.success("Foto profil siap diunggah!");
+    } catch (err) {
+      toast.error("Gagal memproses gambar.");
+    }
+  };
+
+  const handleRemovePhoto = () => {
+    setPhotoFile(null);
+    setPhotoPreview(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+    toast.success("Foto profil dikosongkan");
+  };
+
   const handleRegister = async (e) => {
     e.preventDefault();
 
@@ -91,6 +173,7 @@ export default function Register() {
     setLoading(true);
     const loadingToast = toast.loading("Memproses pendaftaran...");
     let createdUserId = null;
+    let uploadedFilePath = null;
 
     try {
       const cleanEmail = form.email.trim().toLowerCase();
@@ -110,7 +193,6 @@ export default function Register() {
           throw new Error("Email ini sudah terdaftar dan aktif. Silakan menuju halaman masuk.");
         }
         if (existingUser.status === "rejected") {
-          // Bersihkan relasi data lama jika pendaftaran sebelumnya ditolak
           const { data: oldStudent } = await supabase
             .from("students")
             .select("id")
@@ -127,7 +209,7 @@ export default function Register() {
         }
       }
 
-      // 2. Alokasikan dan verifikasi NIS tepat sebelum proses insert dilakukan
+      // 2. Alokasikan dan verifikasi NIS
       let targetNis = form.nis;
       if (!targetNis || targetNis === "Memuat...") {
         targetNis = await fetchAvailableNis();
@@ -162,29 +244,61 @@ export default function Register() {
       if (userError) throw userError;
       createdUserId = newUser.id;
 
-      // 4. Simpan data detail atlet ke tabel students
-      const { error: studentError } = await supabase.from("students").insert([
-        {
-          user_id: newUser.id,
-          nis: targetNis.trim(),
-          parent_name: form.parent_name.trim(),
-          phone_number: form.phone_number.trim(),
-          address: form.address.trim(),
-          age: form.age ? parseInt(form.age, 10) : null,
-          qr_token: `token_student_${uuidv4()}`,
-        },
-      ]);
+      // 4. Upload foto opsional jika ada
+      let uploadedAvatarUrl = null;
+      if (photoFile) {
+        uploadedFilePath = `students/${newUser.id}_${Date.now()}.webp`;
+        const { error: uploadError } = await supabase.storage
+          .from("images")
+          .upload(uploadedFilePath, photoFile, {
+            cacheControl: "3600",
+            upsert: true,
+            contentType: "image/webp",
+          });
 
-      if (studentError) throw studentError;
+        if (!uploadError) {
+          const { data: publicUrlData } = supabase.storage
+            .from("images")
+            .getPublicUrl(uploadedFilePath);
+          uploadedAvatarUrl = publicUrlData?.publicUrl || null;
+        }
+      }
+
+      // 5. Simpan data detail atlet ke tabel students
+      const studentPayload = {
+        user_id: newUser.id,
+        nis: targetNis.trim(),
+        parent_name: form.parent_name.trim(),
+        phone_number: form.phone_number.trim(),
+        address: form.address.trim(),
+        age: form.age ? parseInt(form.age, 10) : null,
+        qr_token: `token_student_${uuidv4()}`,
+        avatar_url: uploadedAvatarUrl,
+      };
+
+      const { error: studentError } = await supabase
+        .from("students")
+        .insert([studentPayload]);
+
+      if (studentError) {
+        delete studentPayload.avatar_url;
+        const { error: fallbackError } = await supabase
+          .from("students")
+          .insert([studentPayload]);
+
+        if (fallbackError) throw fallbackError;
+      }
 
       setRegisteredNis(targetNis.trim());
       toast.success("Pendaftaran berhasil dicatat!", { id: loadingToast });
       setSuccess(true);
     } catch (error) {
-      // Rollback manual jika pembuatan profile gagal di tengah jalan
       if (createdUserId) {
         await supabase.from("students").delete().eq("user_id", createdUserId);
         await supabase.from("users").delete().eq("id", createdUserId);
+      }
+      if (uploadedFilePath) {
+        await supabase.storage.from("images").remove([uploadedFilePath]);
       }
       toast.error(error.message || "Terjadi kesalahan saat pendaftaran.", { id: loadingToast });
     } finally {
@@ -251,6 +365,66 @@ export default function Register() {
           </div>
 
           <form onSubmit={handleRegister} className="space-y-4">
+            {/* Foto Profil Atlet (Opsional) */}
+            <div className="flex items-center gap-4 p-3 bg-slate-50 border border-slate-200 rounded-2xl">
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl overflow-hidden bg-slate-200 border border-slate-300 flex items-center justify-center shadow-xs">
+                  {photoPreview ? (
+                    <img
+                      src={photoPreview}
+                      alt="Pratinjau Foto"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <User size={24} className="text-slate-400" />
+                  )}
+                </div>
+
+                <div className="absolute -bottom-1.5 -right-1.5 flex items-center gap-1">
+                  {photoPreview && (
+                    <button
+                      type="button"
+                      onClick={handleRemovePhoto}
+                      disabled={loading}
+                      className="p-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg shadow-sm transition-all active:scale-90"
+                      title="Kosongkan Foto"
+                    >
+                      <Trash2 size={11} />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={loading}
+                    className="p-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm transition-all active:scale-90"
+                    title="Pilih Foto"
+                  >
+                    <Camera size={13} />
+                  </button>
+                </div>
+              </div>
+
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handlePhotoSelect}
+                accept="image/*"
+                className="hidden"
+              />
+
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-slate-700">Foto Profil Atlet</span>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider bg-slate-200/60 px-2 py-0.5 rounded">
+                    Opsional
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 truncate mt-0.5">
+                  {photoFile ? photoFile.name : "Format JPG, PNG, atau WebP"}
+                </p>
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-3">
                 <div>
