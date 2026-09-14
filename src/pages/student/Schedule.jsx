@@ -14,6 +14,7 @@ import {
   Copy,
   Layers,
   Power,
+  User,
 } from "lucide-react";
 
 const TABS = [
@@ -75,10 +76,10 @@ export default function Schedule() {
           });
         }
 
-        // 2. Ambil data pelatih untuk nama, nomor telepon, dan spesialisasi
+        // 2. Ambil data pelatih termasuk photo_url dari storage
         const { data: coachData, error: coachError } = await supabase
           .from("coaches")
-          .select("id, specialty, phone_number, users(full_name)");
+          .select("id, specialty, phone_number, photo_url, users(full_name)");
 
         if (coachError) throw coachError;
 
@@ -88,6 +89,7 @@ export default function Schedule() {
             name: c.users?.full_name || "Pelatih",
             specialty: c.specialty,
             phone: c.phone_number,
+            photoUrl: c.photo_url || null,
           };
         });
         setCoachesMap(cMap);
@@ -213,7 +215,7 @@ export default function Schedule() {
               const dayName = dateObj.toLocaleDateString("id-ID", { weekday: "long" });
               const dateFull = dateObj.toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
               const timeStr = dateObj.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
-              const assignedCoaches = session.coach_ids?.map((id) => coachesMap[id] || { name: "Instruktur", phone: "" }) || [];
+              const assignedCoaches = session.coach_ids?.map((id) => coachesMap[id] || { name: "Instruktur", phone: "", photoUrl: null }) || [];
 
               // Ambil nama-nama kelas yang aktif diikuti atlet pada sesi ini
               const relevantClassNames = session.class_ids
@@ -274,16 +276,39 @@ export default function Schedule() {
                         assignedCoaches.map((coach, idx) => (
                           <div
                             key={idx}
-                            className="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-700 flex flex-col gap-1.5 min-w-[190px] flex-1 sm:flex-none shadow-sm"
+                            className="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-700 flex flex-col gap-2 min-w-[210px] flex-1 sm:flex-none shadow-sm"
                           >
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="font-bold text-slate-800 truncate">{coach.name}</span>
-                              {coach.specialty && (
-                                <span className="text-[9px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-semibold border border-blue-100 shrink-0">
-                                  {coach.specialty}
-                                </span>
-                              )}
+                            <div className="flex items-center gap-2.5">
+                              {/* Foto Profil Pelatih dari Storage Supabase */}
+                              <div className="w-10 h-10 rounded-xl bg-white border border-slate-200 flex items-center justify-center overflow-hidden shrink-0 shadow-2xs">
+                                {coach.photoUrl ? (
+                                  <img
+                                    src={coach.photoUrl}
+                                    alt={coach.name}
+                                    className="w-full h-full object-cover"
+                                    onError={(e) => {
+                                      e.target.style.display = "none";
+                                    }}
+                                  />
+                                ) : (
+                                  <User size={18} className="text-slate-400" />
+                                )}
+                              </div>
+
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center justify-between gap-1">
+                                  <span className="font-bold text-slate-800 truncate">{coach.name}</span>
+                                </div>
+                                {coach.specialty ? (
+                                  <span className="inline-block text-[9px] bg-blue-50 text-blue-600 px-1.5 py-0.2 rounded font-semibold border border-blue-100 truncate max-w-[120px] mt-0.5">
+                                    {coach.specialty}
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] text-slate-400">Instruktur</span>
+                                )}
+                              </div>
                             </div>
+
                             {coach.phone ? (
                               <button
                                 type="button"

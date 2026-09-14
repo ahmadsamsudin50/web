@@ -86,7 +86,7 @@ export default function Enrollment() {
   const BANK_INFO = {
     bank: "BCA",
     accountNumber: "7112175957",
-    accountHolder: "Rijal Triana",
+    accountHolder: "Rizal Triana",
   };
 
   const loadData = async () => {
