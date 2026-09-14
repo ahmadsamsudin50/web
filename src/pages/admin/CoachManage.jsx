@@ -106,7 +106,7 @@ export default function CoachManage() {
     setConfirmState((prev) => ({ ...prev, isOpen: false, onConfirm: null }));
   };
 
-  // Helper pembersihan berkas foto di Supabase Storage (P4)
+  // Helper pembersihan berkas foto di Supabase Storage
   const extractStoragePath = (publicUrl) => {
     if (!publicUrl) return null;
     try {
@@ -148,7 +148,7 @@ export default function CoachManage() {
     setLoading(true);
     const { data: coachData, error } = await supabase
       .from("coaches")
-      .select("*, users(id, full_name, email, status)")
+      .select("*, users(id, full_name, email, password, status)")
       .order("created_at", { ascending: false });
     if (coachData) setCoaches(coachData);
     if (error) toast.error("Gagal memuat daftar pelatih: " + error.message);
@@ -187,7 +187,7 @@ export default function CoachManage() {
     setForm({
       full_name: c.users?.full_name || "",
       email: c.users?.email || "",
-      password: "",
+      password: c.users?.password || "", // Menampilkan kata sandi dari database
       specialty: c.specialty || "",
       phone_number: c.phone_number || "",
       nickname: c.nickname || "",
@@ -280,20 +280,18 @@ export default function CoachManage() {
     let createdUserId = null;
 
     try {
-      const trimmedPassword = form.password.trim();
+      const cleanPassword = (form.password || "").trim();
+
+      if (cleanPassword.length < 6) {
+        throw new Error("Kata sandi pelatih wajib minimal 6 karakter.");
+      }
 
       if (isEditing) {
         const userUpdateData = {
           full_name: form.full_name.trim(),
           email: form.email.trim().toLowerCase(),
+          password: cleanPassword,
         };
-
-        if (trimmedPassword) {
-          if (trimmedPassword.length < 6) {
-            throw new Error("Kata sandi baru minimal harus 6 karakter.");
-          }
-          userUpdateData.password = trimmedPassword;
-        }
 
         const { error: userError } = await supabase
           .from("users")
@@ -320,17 +318,12 @@ export default function CoachManage() {
 
         if (coachError) throw coachError;
 
-        // P4: Hapus foto lama di storage jika ada berkas foto baru yang diunggah
         if (oldPhotoUrl && finalPhotoUrl !== oldPhotoUrl) {
           await deleteCoachPhotoIfOrphan(oldPhotoUrl, currentId);
         }
 
         toast.success("Data pelatih berhasil diperbarui!", { id: loadingToast });
       } else {
-        if (!trimmedPassword || trimmedPassword.length < 6) {
-          throw new Error("Kata sandi pelatih baru wajib minimal 6 karakter.");
-        }
-
         const cleanEmail = form.email.trim().toLowerCase();
 
         const { data: existingUser } = await supabase
@@ -348,7 +341,7 @@ export default function CoachManage() {
           .insert([
             {
               email: cleanEmail,
-              password: trimmedPassword,
+              password: cleanPassword,
               full_name: form.full_name.trim(),
               role: "coach",
               status: "active",
@@ -387,7 +380,6 @@ export default function CoachManage() {
       setIsModalOpen(false);
       fetchData();
     } catch (error) {
-      // P3 & P4: Rollback bersih jika gagal di tengah jalan
       if (createdUserId) {
         await supabase.from("users").delete().eq("id", createdUserId);
       }
@@ -410,10 +402,8 @@ export default function CoachManage() {
         closeConfirm();
         const loadingToast = toast.loading("Menghapus data pelatih...");
         try {
-          // 1. Bersihkan catatan kehadiran pelatih
           await supabase.from("attendance_logs").delete().eq("coach_id", c.id);
 
-          // 2. Bersihkan referensi pelatih dari tabel sesi jadwal (P2 & P3)
           const { data: relatedSessions } = await supabase
             .from("sessions")
             .select("id, coach_ids");
@@ -430,18 +420,14 @@ export default function CoachManage() {
             }
           }
 
-          // 3. Simpan referensi foto sebelum data baris dihapus (P4)
           const coachPhoto = c.photo_url;
 
-          // 4. Hapus profil pelatih
           const { error: coachErr } = await supabase.from("coaches").delete().eq("id", c.id);
           if (coachErr) throw coachErr;
 
-          // 5. Hapus akun login pengguna
           const { error: userErr } = await supabase.from("users").delete().eq("id", c.user_id);
           if (userErr) throw userErr;
 
-          // 6. Bersihkan file foto dari storage bucket jika tidak dipakai baris lain (P4)
           if (coachPhoto) {
             await deleteCoachPhotoIfOrphan(coachPhoto, c.id);
           }
@@ -647,20 +633,18 @@ export default function CoachManage() {
                   <div className="sm:col-span-2">
                     <div className="flex items-center justify-between mb-1">
                       <label className={labelCls}>Kata Sandi</label>
-                      {isEditing && (
-                        <span className="text-[10px] text-slate-400 italic">
-                          (Kosongkan jika tidak ingin mengubah sandi)
-                        </span>
-                      )}
+                      <span className="text-[10px] text-slate-400 italic">
+                        {isEditing ? "(Kata sandi akun saat ini)" : "(Minimal 6 karakter)"}
+                      </span>
                     </div>
                     <div className="relative">
                       <input
                         type={showPassword ? "text" : "password"}
-                        required={!isEditing}
+                        required
                         value={form.password}
                         onChange={(e) => setForm({ ...form, password: e.target.value })}
                         className={`${inputCls} pr-10 font-mono`}
-                        placeholder={isEditing ? "Masukkan kata sandi baru..." : "Minimal 6 karakter"}
+                        placeholder="Kata sandi akun"
                       />
                       <button
                         type="button"

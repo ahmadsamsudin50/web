@@ -87,7 +87,6 @@ export default function StudentManage() {
   const [isEditing, setIsEditing] = useState(false);
   const [selectedStudentId, setSelectedStudentId] = useState(null);
   const [selectedUserId, setSelectedUserId] = useState(null);
-  const [currentPasswordInDb, setCurrentPasswordInDb] = useState("");
   const [showPassword, setShowPassword] = useState(false);
 
   const initialForm = {
@@ -150,28 +149,47 @@ export default function StudentManage() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const { data: cls, error: clsError } = await supabase
-        .from("classes")
-        .select("id, name, category")
-        .order("name");
+      const [clsRes, stdRes, logsRes] = await Promise.all([
+        supabase.from("classes").select("id, name, category").order("name"),
+        supabase
+          .from("students")
+          .select(`
+            *,
+            users ( id, full_name, email, password, status ),
+            student_enrollments ( id, class_id, status, completed_at, classes ( name, category, max_sessions ) )
+          `)
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("attendance_logs")
+          .select("enrollment_id")
+          .in("status", ["hadir_qr", "hadir_manual"]),
+      ]);
 
-      if (clsError) throw clsError;
-      setClasses(Array.isArray(cls) ? cls : []);
+      if (clsRes.error) throw clsRes.error;
+      if (stdRes.error) throw stdRes.error;
 
-      const { data: std, error: stdError } = await supabase
-        .from("students")
-        .select(`
-          *,
-          users ( id, full_name, email, password, status ),
-          student_enrollments ( id, class_id, status, completed_at, classes ( name, category, max_sessions ) )
-        `)
-        .order("created_at", { ascending: false });
+      setClasses(Array.isArray(clsRes.data) ? clsRes.data : []);
 
-      if (stdError) throw stdError;
+      // Hitung total sesi kehadiran valid per enrollment_id
+      const attendanceCountMap = {};
+      if (Array.isArray(logsRes.data)) {
+        logsRes.data.forEach((log) => {
+          if (log.enrollment_id) {
+            attendanceCountMap[log.enrollment_id] =
+              (attendanceCountMap[log.enrollment_id] || 0) + 1;
+          }
+        });
+      }
 
-      if (Array.isArray(std)) {
-        const formatted = std.map((s) => {
-          const enrollments = Array.isArray(s.student_enrollments) ? s.student_enrollments : [];
+      if (Array.isArray(stdRes.data)) {
+        const formatted = stdRes.data.map((s) => {
+          const rawEnrollments = Array.isArray(s.student_enrollments) ? s.student_enrollments : [];
+          
+          const enrollments = rawEnrollments.map((enr) => ({
+            ...enr,
+            attendanceCount: attendanceCountMap[enr.id] || 0,
+          }));
+
           return {
             ...s,
             enrollments,
@@ -205,17 +223,15 @@ export default function StudentManage() {
     setIsEditing(false);
     setSelectedStudentId(null);
     setSelectedUserId(null);
-    setCurrentPasswordInDb("");
     setShowPassword(false);
     setIsFormModalOpen(true);
   };
 
   const openEditModal = (s) => {
-    const existingPassword = s.users?.password || "";
     setFormData({
       full_name: s.users?.full_name || "",
       email: s.users?.email || "",
-      password: "", // Dikosongkan agar opsional diubah
+      password: s.users?.password || "", // Menampilkan kata sandi dari database
       nis: s.nis || "",
       parent_name: s.parent_name || "",
       age: s.age ?? "",
@@ -225,7 +241,6 @@ export default function StudentManage() {
     setIsEditing(true);
     setSelectedStudentId(s.id);
     setSelectedUserId(s.user_id);
-    setCurrentPasswordInDb(existingPassword);
     setShowPassword(false);
     setIsFormModalOpen(true);
   };
@@ -238,21 +253,18 @@ export default function StudentManage() {
     );
 
     try {
-      const trimmedPassword = (formData.password || "").trim();
+      const cleanPassword = (formData.password || "").trim();
+
+      if (cleanPassword.length < 6) {
+        throw new Error("Kata sandi minimal harus 6 karakter.");
+      }
 
       if (isEditing) {
         const userPayload = {
           full_name: (formData.full_name || "").trim(),
           email: (formData.email || "").trim(),
+          password: cleanPassword,
         };
-
-        // Hanya perbarui password jika user mengisinya
-        if (trimmedPassword) {
-          if (trimmedPassword.length < 6) {
-            throw new Error("Kata sandi baru minimal terdiri dari 6 karakter.");
-          }
-          userPayload.password = trimmedPassword;
-        }
 
         const { error: userError } = await supabase
           .from("users")
@@ -274,10 +286,6 @@ export default function StudentManage() {
 
         toast.success("Profil atlet berhasil diperbarui!", { id: loadingToast });
       } else {
-        if (!trimmedPassword || trimmedPassword.length < 6) {
-          throw new Error("Kata sandi untuk atlet baru wajib minimal 6 karakter.");
-        }
-
         const { data: existingUser } = await supabase
           .from("users")
           .select("id")
@@ -305,7 +313,7 @@ export default function StudentManage() {
           .insert([
             {
               email: (formData.email || "").trim(),
-              password: trimmedPassword,
+              password: cleanPassword,
               full_name: (formData.full_name || "").trim(),
               role: "student",
               status: "active",
@@ -369,7 +377,6 @@ export default function StudentManage() {
     });
   };
 
-  // Safe Cascade Delete
   const handleDeleteStudent = (s) => {
     triggerConfirm({
       title: "Hapus Data Atlet?",
@@ -380,35 +387,30 @@ export default function StudentManage() {
         closeConfirm();
         const loadingToast = toast.loading("Menghapus seluruh rekaman...");
         try {
-          // 1. Hapus seluruh log absensi atlet terlebih dahulu
           const { error: logErr } = await supabase
             .from("attendance_logs")
             .delete()
             .eq("student_id", s.id);
           if (logErr) throw logErr;
 
-          // 2. Hapus seluruh pendaftaran kelas
           const { error: enrollErr } = await supabase
             .from("student_enrollments")
             .delete()
             .eq("student_id", s.id);
           if (enrollErr) throw enrollErr;
 
-          // 3. Hapus riwayat pembayaran
           const { error: payErr } = await supabase
             .from("payments")
             .delete()
             .eq("student_id", s.id);
           if (payErr) throw payErr;
 
-          // 4. Hapus data profil atlet
           const { error: studentErr } = await supabase
             .from("students")
             .delete()
             .eq("id", s.id);
           if (studentErr) throw studentErr;
 
-          // 5. Hapus akun pengguna di users
           const { error: userErr } = await supabase
             .from("users")
             .delete()
@@ -424,7 +426,6 @@ export default function StudentManage() {
     });
   };
 
-  // Filter Tab
   const filteredByTab = Array.isArray(students)
     ? students.filter((s) => {
         if (activeTab === "active") {
@@ -453,9 +454,15 @@ export default function StudentManage() {
         s.parent_name?.toLowerCase().includes(q) ||
         s.phone_number?.toLowerCase().includes(q);
 
-      const hasClass =
-        filterClass === "all" ||
-        (Array.isArray(s.enrollments) && s.enrollments.some((e) => e.class_id === filterClass));
+      // Logika penanganan filter kelas
+      let hasClass = true;
+      if (filterClass === "none") {
+        // Murid tanpa pendaftaran kelas sama sekali atau tidak memiliki kelas aktif
+        hasClass = !s.enrollments || s.enrollments.length === 0;
+      } else if (filterClass !== "all") {
+        hasClass =
+          Array.isArray(s.enrollments) && s.enrollments.some((e) => e.class_id === filterClass);
+      }
 
       return matchSearch && hasClass;
     })
@@ -588,12 +595,15 @@ export default function StudentManage() {
             className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm outline-none focus:ring-2 focus:ring-blue-500 font-medium"
           />
         </div>
+
+        {/* Dropdown Filter Kelas */}
         <select
           value={filterClass}
           onChange={(e) => setFilterClass(e.target.value)}
           className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm font-medium text-slate-700 outline-none cursor-pointer"
         >
           <option value="all">Semua Kelas</option>
+          <option value="none">Belum Ada Kelas</option>
           {Array.isArray(classes) &&
             classes.map((c) => (
               <option key={c.id} value={c.id}>
@@ -601,6 +611,7 @@ export default function StudentManage() {
               </option>
             ))}
         </select>
+
         <button
           type="button"
           onClick={() => setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"))}
@@ -613,11 +624,11 @@ export default function StudentManage() {
       {/* Tabel Data Atlet */}
       <div className="max-w-7xl mx-auto bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[850px]">
+          <table className="w-full text-left border-collapse min-w-[950px]">
             <thead>
               <tr className="bg-slate-50 text-slate-400 text-[10px] uppercase tracking-wider font-bold border-b border-slate-100">
                 <th className="px-5 py-3.5">Identitas Atlet</th>
-                <th className="px-5 py-3.5">Status Kelas & Pertemuan</th>
+                <th className="px-5 py-3.5 min-w-[240px]">Status Kelas & Pertemuan</th>
                 <th className="px-5 py-3.5">Nama Orang Tua / Usia</th>
                 <th className="px-5 py-3.5">Kontak & Alamat</th>
                 <th className="px-5 py-3.5 text-right">Aksi</th>
@@ -641,38 +652,48 @@ export default function StudentManage() {
                     </div>
                   </td>
 
-                  {/* Kolom Status Kelas & Masa Habis */}
-                  <td className="px-5 py-4">
-                    <div className="flex flex-col gap-1.5 max-w-xs">
+                  {/* Kolom Status Kelas & Rincian Pertemuan Lengkap */}
+                  <td className="px-5 py-4 min-w-[240px]">
+                    <div className="flex flex-col gap-1.5 w-full">
                       {s.enrollments && s.enrollments.length > 0 ? (
                         s.enrollments.map((enr, i) => {
                           const isCompleted = enr.status === "completed";
+                          const currentAttend = enr.attendanceCount || 0;
+                          const maxSessions = enr.classes?.max_sessions || 12;
+
                           return (
                             <div
                               key={i}
-                              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold border ${
+                              className={`flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-xl text-[10px] font-bold border shadow-2xs ${
                                 isCompleted
-                                  ? "bg-amber-50 text-amber-900 border-amber-200"
-                                  : "bg-emerald-50 text-emerald-800 border-emerald-200"
+                                  ? "bg-slate-50 text-slate-700 border-slate-200"
+                                  : "bg-emerald-50/80 text-emerald-950 border-emerald-200"
                               }`}
                             >
-                              {isCompleted ? (
-                                <Clock size={11} className="text-amber-600 shrink-0" />
-                              ) : (
-                                <CheckCircle2 size={11} className="text-emerald-600 shrink-0" />
-                              )}
-                              <span className={`truncate ${isCompleted ? "line-through opacity-80" : ""}`}>
-                                {enr.classes?.name}
-                              </span>
-                              <span
-                                className={`text-[9px] px-1.5 py-0.2 rounded font-black shrink-0 ${
-                                  isCompleted
-                                    ? "bg-amber-200/70 text-amber-950"
-                                    : "bg-emerald-200/60 text-emerald-950"
-                                }`}
-                              >
-                                {isCompleted ? "Selesai (Habis)" : "Aktif"}
-                              </span>
+                              <div className="flex items-center gap-1.5 flex-1 pr-1">
+                                {isCompleted ? (
+                                  <Clock size={13} className="text-slate-400 shrink-0" />
+                                ) : (
+                                  <CheckCircle2 size={13} className="text-emerald-600 shrink-0" />
+                                )}
+                                <span className={`font-semibold whitespace-normal leading-tight ${isCompleted ? "text-slate-500" : "text-emerald-950"}`}>
+                                  {enr.classes?.name || "Kelas Latihan"}
+                                </span>
+                              </div>
+
+                              <div className="flex items-center shrink-0">
+                                <span
+                                  className={`text-[9px] font-mono px-2 py-0.5 rounded font-bold whitespace-nowrap ${
+                                    isCompleted
+                                      ? "bg-slate-200/80 text-slate-600"
+                                      : "bg-emerald-200/70 text-emerald-950"
+                                  }`}
+                                >
+                                  {isCompleted
+                                    ? "Selesai"
+                                    : `${currentAttend}/${maxSessions} Pertemuan`}
+                                </span>
+                              </div>
                             </div>
                           );
                         })
@@ -806,20 +827,18 @@ export default function StudentManage() {
                       <label className="block font-bold text-slate-600 uppercase text-[10px]">
                         Kata Sandi
                       </label>
-                      {isEditing && (
-                        <span className="text-[10px] text-slate-400 italic">
-                          (Kosongkan jika tidak ingin mengubah sandi)
-                        </span>
-                      )}
+                      <span className="text-[10px] text-slate-400 italic">
+                        {isEditing ? "(Kata sandi akun saat ini)" : "(Minimal 6 karakter)"}
+                      </span>
                     </div>
                     <div className="relative">
                       <input
                         type={showPassword ? "text" : "password"}
-                        required={!isEditing}
+                        required
                         value={formData.password}
                         onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                         className="w-full px-3 py-2 pr-10 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500 font-mono"
-                        placeholder={isEditing ? "Masukkan kata sandi baru..." : "Minimal 6 karakter"}
+                        placeholder="Kata sandi akun"
                       />
                       <button
                         type="button"
@@ -907,7 +926,7 @@ export default function StudentManage() {
               </div>
 
               <div className="p-3 bg-blue-50/50 rounded-2xl border border-blue-100 text-[11px] text-slate-500">
-                <span className="font-bold text-blue-700">Catatan Sistem:</span> Pemilihan dan aktivasi kelas dilakukan secara mandiri oleh atlet melalui formulir pendaftaran atlet setelah akun disetujui.
+                <span className="font-bold text-blue-700">Catatan Sistem:</span> Pemilihan dan aktivasi kelas dilakukan secara mandiri oleh atlet melalui formulir pendaftaran atlet setelah akun disetujui[cite: 4].
               </div>
 
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">

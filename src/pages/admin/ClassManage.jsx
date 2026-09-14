@@ -14,6 +14,10 @@ import {
   Users,
   Loader2,
   Tag,
+  Eye,
+  CheckCircle2,
+  Clock,
+  User,
 } from "lucide-react";
 
 const CATEGORY_OPTIONS = [
@@ -95,6 +99,15 @@ export default function ClassManage() {
     name: "",
   });
 
+  // State Modal Detail Murid Terdaftar
+  const [studentsModal, setStudentsModal] = useState({
+    isOpen: false,
+    classData: null,
+    studentsList: [],
+    loading: false,
+    search: "",
+  });
+
   const fetchClasses = async () => {
     setLoading(true);
     try {
@@ -133,6 +146,57 @@ export default function ClassManage() {
   useEffect(() => {
     fetchClasses();
   }, []);
+
+  // Membuka modal daftar murid di kelas yang dipilih tanpa menggunakan created_at
+  const openStudentsListModal = async (c) => {
+    setStudentsModal({
+      isOpen: true,
+      classData: c,
+      studentsList: [],
+      loading: true,
+      search: "",
+    });
+
+    try {
+      const [enrollRes, logsRes] = await Promise.all([
+        supabase
+          .from("student_enrollments")
+          .select(`
+            id, status, completed_at,
+            students ( id, nis, parent_name, phone_number, users ( full_name, email ) )
+          `)
+          .eq("class_id", c.id)
+          .order("id", { ascending: false }),
+        supabase
+          .from("attendance_logs")
+          .select("enrollment_id")
+          .in("status", ["hadir_qr", "hadir_manual"]),
+      ]);
+
+      if (enrollRes.error) throw enrollRes.error;
+
+      const attendMap = {};
+      (logsRes.data || []).forEach((l) => {
+        if (l.enrollment_id) {
+          attendMap[l.enrollment_id] = (attendMap[l.enrollment_id] || 0) + 1;
+        }
+      });
+
+      const list = (enrollRes.data || []).map((item) => ({
+        ...item,
+        attendanceCount: attendMap[item.id] || 0,
+      }));
+
+      setStudentsModal((prev) => ({
+        ...prev,
+        studentsList: list,
+        loading: false,
+      }));
+    } catch (err) {
+      toast.error("Gagal memuat daftar murid: " + err.message);
+      setStudentsModal((prev) => ({ ...prev, loading: false }));
+    }
+  };
 
   const openAddModal = () => {
     setForm({
@@ -374,6 +438,15 @@ export default function ClassManage() {
     return matchQuery && matchCat;
   });
 
+  // Filter pencarian murid di dalam modal
+  const filteredStudentsInModal = studentsModal.studentsList.filter((item) => {
+    const q = studentsModal.search.toLowerCase();
+    const name = item.students?.users?.full_name?.toLowerCase() || "";
+    const nis = item.students?.nis?.toLowerCase() || "";
+    const parent = item.students?.parent_name?.toLowerCase() || "";
+    return name.includes(q) || nis.includes(q) || parent.includes(q);
+  });
+
   return (
     <div className="min-h-screen bg-[#f8fafc] p-4 md:p-8 font-sans relative">
       <Toaster position="top-right" toastOptions={{ style: { borderRadius: "16px", fontWeight: "500" } }} />
@@ -524,6 +597,13 @@ export default function ClassManage() {
                       <td className="px-8 py-5 text-right">
                         <div className="flex justify-end gap-2">
                           <button
+                            onClick={() => openStudentsListModal(c)}
+                            className="p-2.5 text-indigo-600 bg-indigo-50 hover:bg-indigo-600 hover:text-white rounded-xl transition-all shadow-sm"
+                            title="Lihat Murid Terdaftar"
+                          >
+                            <Users size={16} />
+                          </button>
+                          <button
                             onClick={() => openEditModal(c)}
                             className="p-2.5 text-blue-600 bg-blue-50 hover:bg-blue-600 hover:text-white rounded-xl transition-all shadow-sm"
                             title="Ubah Kelas"
@@ -558,6 +638,126 @@ export default function ClassManage() {
           </table>
         </div>
       </div>
+
+      {/* Modal Daftar Murid Terdaftar */}
+      {studentsModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-200">
+            <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                  <Users size={20} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-800">
+                    Murid Terdaftar: {studentsModal.classData?.name}
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Maks {studentsModal.classData?.max_sessions || 12} Sesi Pertemuan • Kapasitas: {studentsModal.classData?.max_capacity} Siswa
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setStudentsModal((prev) => ({ ...prev, isOpen: false }))}
+                className="p-2 bg-white rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-all border border-slate-100 shadow-sm"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-4 border-b border-slate-100 bg-white">
+              <div className="relative">
+                <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Cari nama murid, NIS, atau nama wali..."
+                  value={studentsModal.search}
+                  onChange={(e) =>
+                    setStudentsModal((prev) => ({ ...prev, search: e.target.value }))
+                  }
+                  className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
+                />
+              </div>
+            </div>
+
+            <div className="overflow-y-auto p-4 flex-1 space-y-2.5">
+              {studentsModal.loading ? (
+                <div className="py-16 text-center text-slate-400">
+                  <Loader2 size={28} className="animate-spin mx-auto text-indigo-600 mb-2" />
+                  <p className="text-xs font-medium">Memuat daftar murid...</p>
+                </div>
+              ) : filteredStudentsInModal.length === 0 ? (
+                <div className="py-12 text-center text-slate-400">
+                  <User size={32} className="mx-auto mb-2 text-slate-300" />
+                  <p className="font-bold text-slate-700 text-xs">Tidak ada murid ditemukan</p>
+                  <p className="text-[11px] mt-0.5">Belum ada murid yang mendaftar pada kelas ini.</p>
+                </div>
+              ) : (
+                filteredStudentsInModal.map((item) => {
+                  const isCompleted = item.status === "completed";
+                  const maxSessions = studentsModal.classData?.max_sessions || 12;
+                  return (
+                    <div
+                      key={item.id}
+                      className="p-3.5 bg-slate-50/80 hover:bg-slate-50 rounded-2xl border border-slate-200/80 flex items-center justify-between gap-3 transition-colors"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-9 h-9 rounded-full bg-white border border-slate-200 text-indigo-600 flex items-center justify-center font-bold text-xs shrink-0 shadow-2xs">
+                          <User size={16} />
+                        </div>
+                        <div className="min-w-0">
+                          <h4 className="font-bold text-slate-800 text-xs truncate">
+                            {item.students?.users?.full_name || "Tanpa Nama"}
+                          </h4>
+                          <div className="flex items-center gap-2 text-[10px] text-slate-400 mt-0.5">
+                            <span className="font-mono font-semibold text-slate-600">
+                              NIS: {item.students?.nis}
+                            </span>
+                            {item.students?.parent_name && (
+                              <>
+                                <span>•</span>
+                                <span className="truncate">Wali: {item.students?.parent_name}</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span
+                          className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold border ${
+                            isCompleted
+                              ? "bg-slate-100 text-slate-600 border-slate-200"
+                              : "bg-emerald-50 text-emerald-800 border-emerald-200"
+                          }`}
+                        >
+                          {isCompleted ? <Clock size={11} /> : <CheckCircle2 size={11} />}
+                          {isCompleted ? "Selesai" : "Aktif"}
+                        </span>
+                        <span className="text-[10px] font-mono font-bold px-2 py-1 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-100">
+                          {item.attendanceCount}/{maxSessions} Sesi
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="px-6 py-3.5 border-t border-slate-100 bg-slate-50/50 flex justify-between items-center text-xs text-slate-500">
+              <span>
+                Total Murid: <b>{filteredStudentsInModal.length}</b> Siswa
+              </span>
+              <button
+                onClick={() => setStudentsModal((prev) => ({ ...prev, isOpen: false }))}
+                className="px-4 py-1.5 bg-white border border-slate-200 hover:bg-slate-100 rounded-xl font-bold text-slate-700 text-xs transition-colors shadow-2xs"
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">

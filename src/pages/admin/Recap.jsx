@@ -15,15 +15,33 @@ import {
 
 export default function Recap() {
   const [logs, setLogs] = useState([]);
+  const [classes, setClasses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [attendeeType, setAttendeeType] = useState("student");
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
+  const [filterClass, setFilterClass] = useState("all");
   const [sortOrder, setSortOrder] = useState("desc");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const ITEMS_PER_PAGE = 10;
+
+  // Mengambil daftar kelas untuk pilihan dropdown filter
+  useEffect(() => {
+    const fetchClasses = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("classes")
+          .select("id, name")
+          .order("name");
+        if (!error && data) {
+          setClasses(data);
+        }
+      } catch (_) {}
+    };
+    fetchClasses();
+  }, []);
 
   const fetchLogs = async (type) => {
     setLoading(true);
@@ -34,7 +52,7 @@ export default function Recap() {
           .select(`
             id, status, scanned_at, enrollment_id,
             students ( nis, users ( full_name ) ),
-            student_enrollments ( classes ( name ) ),
+            student_enrollments ( class_id, classes ( name ) ),
             sessions ( name, session_date )
           `)
           .not("student_id", "is", null)
@@ -67,12 +85,13 @@ export default function Recap() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, filterStatus, sortOrder, attendeeType, dateFrom, dateTo]);
+  }, [searchQuery, filterStatus, filterClass, sortOrder, attendeeType, dateFrom, dateTo]);
 
   const handleTypeChange = (type) => {
     setAttendeeType(type);
     setSearchQuery("");
     setFilterStatus("all");
+    setFilterClass("all");
     setSortOrder("desc");
     setDateFrom("");
     setDateTo("");
@@ -102,6 +121,13 @@ export default function Recap() {
 
   if (filterStatus !== "all") {
     processedLogs = processedLogs.filter((log) => log.status === filterStatus);
+  }
+
+  // Filter khusus kelas atlet
+  if (attendeeType === "student" && filterClass !== "all") {
+    processedLogs = processedLogs.filter(
+      (log) => log.student_enrollments?.class_id === filterClass
+    );
   }
 
   if (dateFrom && dateFrom.trim() !== "") {
@@ -191,10 +217,17 @@ export default function Recap() {
     return "bg-slate-200 text-slate-700 border-slate-300";
   };
 
-  const hasActiveFilters = searchQuery || filterStatus !== "all" || dateFrom || dateTo;
+  const hasActiveFilters =
+    searchQuery ||
+    filterStatus !== "all" ||
+    (attendeeType === "student" && filterClass !== "all") ||
+    dateFrom ||
+    dateTo;
+
   const clearAllFilters = () => {
     setSearchQuery("");
     setFilterStatus("all");
+    setFilterClass("all");
     setDateFrom("");
     setDateTo("");
   };
@@ -266,6 +299,23 @@ export default function Recap() {
             <option value="sakit">Sakit</option>
             <option value="alpa">Alpa</option>
           </select>
+
+          {/* Filter Kelas (Hanya untuk Kategori Atlet) */}
+          {attendeeType === "student" && (
+            <select
+              value={filterClass}
+              onChange={(e) => setFilterClass(e.target.value)}
+              className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none font-medium text-slate-700 cursor-pointer"
+            >
+              <option value="all">Semua Kelas</option>
+              {classes.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          )}
+
           <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-xl px-2 py-1">
             <CalendarDays size={13} className="text-slate-400" />
             <input

@@ -122,7 +122,7 @@ export default function ScanQR() {
     fetchActiveSessions();
   }, []);
 
-  // Eksekusi pencatatan presensi spesifik per enrollment_id (P2 & P3)
+  // Eksekusi pencatatan presensi spesifik per enrollment_id
   const recordAttendance = async (student, enrollment) => {
     try {
       // 1. Verifikasi akhir duplikasi presensi untuk enrollment spesifik ini
@@ -199,7 +199,6 @@ export default function ScanQR() {
     const cleanToken = decodedText?.trim();
     if (!cleanToken) return;
 
-    // Abaikan jika pemindai sedang memproses atau kartu yang sama masih tertahan di depan kamera
     if (isProcessingRef.current || lastScannedTokenRef.current === cleanToken) {
       return;
     }
@@ -207,7 +206,6 @@ export default function ScanQR() {
     isProcessingRef.current = true;
     lastScannedTokenRef.current = cleanToken;
 
-    // Reset lock token setelah 3 detik jika kartu sudah ditarik dari kamera
     if (tokenResetTimeoutRef.current) {
       clearTimeout(tokenResetTimeoutRef.current);
     }
@@ -218,7 +216,6 @@ export default function ScanQR() {
     setScanStatus({ type: "info", message: "Memverifikasi Kode QR..." });
 
     try {
-      // 1. Identifikasi profil atlet via QR token
       const { data: student, error: studentError } = await supabase
         .from("students")
         .select("id, users(full_name)")
@@ -229,13 +226,11 @@ export default function ScanQR() {
         throw new Error("Kode QR tidak valid atau data atlet tidak ditemukan.");
       }
 
-      // 2. Ambil konfigurasi kelas dari sesi yang sedang aktif
       const sessionObj = activeSessionsRef.current.find((s) => s.id === selectedSession);
       if (!sessionObj || !sessionObj.class_ids || sessionObj.class_ids.length === 0) {
         throw new Error("Sesi ini belum dikonfigurasi dengan kelas latihan.");
       }
 
-      // 3. Ambil pendaftaran aktif atlet yang cocok dengan kelas di sesi ini
       const { data: enrollments, error: enrollError } = await supabase
         .from("student_enrollments")
         .select("id, class_id, status, classes(name, max_sessions)")
@@ -259,7 +254,6 @@ export default function ScanQR() {
         throw new Error("Atlet tidak terdaftar aktif di kelompok kelas sesi ini.");
       }
 
-      // 4. Periksa log presensi atlet pada sesi ini untuk menentukan kelas yang belum diabsenkan
       const { data: currentSessionLogs, error: logFetchError } = await supabase
         .from("attendance_logs")
         .select("enrollment_id")
@@ -272,17 +266,14 @@ export default function ScanQR() {
         (currentSessionLogs || []).map((l) => l.enrollment_id).filter(Boolean)
       );
 
-      // Filter sisa pendaftaran kelas yang BELUM absen pada sesi ini
       const unrecordedEnrollments = enrollments.filter(
         (enr) => !attendedEnrollmentIds.has(enr.id)
       );
 
-      // Jika seluruh kelas atlet pada sesi ini sudah terabsenkan
       if (unrecordedEnrollments.length === 0) {
         throw new Error(`${student.users?.full_name || "Atlet"} sudah mencatat seluruh kehadiran kelasnya pada sesi ini.`);
       }
 
-      // 5. Jika tersisa lebih dari 1 kelas yang belum absen, buka dialog pemilihan kelas
       if (unrecordedEnrollments.length > 1) {
         setMultiClassPrompt({
           isOpen: true,
@@ -292,7 +283,6 @@ export default function ScanQR() {
         return;
       }
 
-      // Jika hanya ada 1 kelas yang belum absen, langsung catat presensi
       await recordAttendance(student, unrecordedEnrollments[0]);
     } catch (err) {
       playError();
@@ -510,14 +500,24 @@ export default function ScanQR() {
           </div>
         </div>
 
+        {/* Kolom Panel Kamera */}
         <div className="md:col-span-2">
-          <div className="bg-white rounded-3xl border border-slate-200 p-5 shadow-sm min-h-[440px] flex flex-col items-center justify-center relative overflow-hidden">
-            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest self-start mb-4 flex items-center gap-2">
-              <Camera size={16} /> Jendela Kamera
-            </h2>
+          <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-sm min-h-[460px] flex flex-col relative overflow-hidden">
+            
+            {/* Header Jendela Kamera - Posisikan Rapi di Kiri Atas */}
+            <div className="w-full flex items-center justify-between border-b border-slate-100 pb-4 mb-4">
+              <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                <Camera size={16} className="text-blue-600" /> Jendela Kamera
+              </h2>
+              {selectedSession && (
+                <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full bg-blue-50 text-blue-600">
+                  Gerbang Terhubung
+                </span>
+              )}
+            </div>
 
             {selectedSession ? (
-              <div className="w-full flex flex-col items-center">
+              <div className="flex-1 w-full flex flex-col items-center justify-center">
                 {scanStatus.type !== "idle" && (
                   <div
                     className={`mb-4 px-4 py-3 rounded-xl flex items-center gap-3 w-full max-w-sm text-xs font-bold text-white shadow-md animate-in fade-in zoom-in-95 ${
@@ -562,10 +562,17 @@ export default function ScanQR() {
                 )}
               </div>
             ) : (
-              <div className="text-center text-slate-400 py-12">
-                <Video size={40} className="mx-auto mb-2 text-slate-300" />
-                <p className="text-sm font-bold text-slate-600">Gerbang Belum Dipilih</p>
-                <p className="text-xs mt-1">Pilih sesi aktif di panel kiri untuk menyalakan kamera.</p>
+              /* State Tampilan Kosong (Dead-Center Sempurna) */
+              <div className="flex-1 w-full flex flex-col items-center justify-center text-center p-6 my-auto">
+                <div className="w-16 h-16 rounded-2xl bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-300 mb-4 shadow-sm">
+                  <Video size={32} />
+                </div>
+                <h3 className="text-base font-bold text-slate-700 mb-1">
+                  Gerbang Belum Dipilih
+                </h3>
+                <p className="text-xs text-slate-400 max-w-xs leading-relaxed">
+                  Pilih sesi latihan yang aktif pada panel di sebelah kiri untuk mengaktifkan pemindai kamera.
+                </p>
               </div>
             )}
           </div>
