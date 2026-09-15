@@ -8,6 +8,7 @@ import Testimonials from "../components/landing/Testimonials";
 import Footer from "../components/landing/Footer";
 import { supabase } from "../utils/supabaseClient";
 import { ArrowUp } from "lucide-react";
+import ScheduleSection from "../components/landing/ScheduleSection";
 
 export default function LandingPage() {
   const [waNumber, setWaNumber] = useState("");
@@ -50,6 +51,7 @@ export default function LandingPage() {
       <main>
         <Hero />
         <AboutUs />
+        <ScheduleSection />
         <Course />
         <Coach />
         <Testimonials />

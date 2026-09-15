@@ -55,6 +55,12 @@ export default function Navbar() {
           >
             Program
           </a>
+          <a
+            href="#schedule"
+            className="hover:text-cyan-400 transition-colors pb-1 border-b-2 border-transparent hover:border-cyan-400"
+          >
+            Jadwal
+          </a>
 
           <a
             href="#coach"

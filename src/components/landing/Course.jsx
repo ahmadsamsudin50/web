@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import {
   Check,
   Droplets,
@@ -15,6 +15,9 @@ import {
   Bookmark,
   Users,
   Clock,
+  CreditCard,
+  Layers,
+  Flame,
 } from "lucide-react";
 import { supabase } from "../../utils/supabaseClient";
 
@@ -28,7 +31,6 @@ const CATEGORIES = [
   { key: "intensif", label: "Intensif" },
 ];
 
-// Helper mengubah schedule_info (baik JSONB Objek maupun String) menjadi teks yang aman dirender
 const formatScheduleText = (schedule) => {
   if (!schedule) return null;
 
@@ -59,6 +61,10 @@ export default function Course() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [visibleCount, setVisibleCount] = useState(3);
+
+  const [selectedCourseModal, setSelectedCourseModal] = useState(null);
+  const [highlightedCourseId, setHighlightedCourseId] = useState(null);
+  const highlightTimeoutRef = useRef(null);
 
   useEffect(() => {
     let mounted = true;
@@ -144,6 +150,45 @@ export default function Course() {
     };
   }, []);
 
+  // Listener Event: Auto-show kartu tersembunyi & sorot kartu target
+  useEffect(() => {
+    const handleHighlightEvent = (e) => {
+      const targetId = e.detail?.classId;
+      if (!targetId || courses.length === 0) return;
+
+      setSelectedCategory("all");
+      setSearchQuery("");
+
+      const targetIndex = courses.findIndex((c) => c.id === targetId);
+      if (targetIndex !== -1) {
+        setVisibleCount((prev) => Math.max(prev, targetIndex + 1));
+      }
+
+      setHighlightedCourseId(targetId);
+
+      if (highlightTimeoutRef.current) {
+        clearTimeout(highlightTimeoutRef.current);
+      }
+
+      setTimeout(() => {
+        const targetElement = document.getElementById(`course-card-${targetId}`);
+        if (targetElement) {
+          targetElement.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      }, 200);
+
+      highlightTimeoutRef.current = setTimeout(() => {
+        setHighlightedCourseId(null);
+      }, 4500);
+    };
+
+    window.addEventListener("highlight-course-card", handleHighlightEvent);
+    return () => {
+      window.removeEventListener("highlight-course-card", handleHighlightEvent);
+      if (highlightTimeoutRef.current) clearTimeout(highlightTimeoutRef.current);
+    };
+  }, [courses]);
+
   useEffect(() => {
     const handleResize = () => {
       const mobile = window.innerWidth < 640;
@@ -155,9 +200,15 @@ export default function Course() {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  useEffect(() => {
+  const handleCategoryChange = (catKey) => {
+    setSelectedCategory(catKey);
     setVisibleCount(isMobile ? 1 : 3);
-  }, [searchQuery, selectedCategory, isMobile]);
+  };
+
+  const handleSearchChange = (val) => {
+    setSearchQuery(val);
+    setVisibleCount(isMobile ? 1 : 3);
+  };
 
   const formatRupiah = (number) => {
     return new Intl.NumberFormat("id-ID", {
@@ -184,9 +235,9 @@ export default function Course() {
     }
   };
 
-  const getCategoryBadgeClass = (category, isPopular) => {
-    if (isPopular) {
-      return "bg-cyan-400/20 text-cyan-200 border-cyan-400/30";
+  const getCategoryBadgeClass = (category, isHighlighted) => {
+    if (isHighlighted) {
+      return "bg-cyan-400 text-slate-950 border-cyan-300 font-black";
     }
     switch (category?.toLowerCase()) {
       case "anak-anak":
@@ -249,7 +300,7 @@ export default function Course() {
             Pilihan Kelas <span className="text-cyan-400">Renang Terbaik</span>
           </h3>
           <p className="text-slate-400 text-sm md:text-base mt-3 font-medium leading-relaxed">
-            Kurikulum bertingkat yang dirancang terstruktur dari pengenalan air hingga persiapan kejuaraan profesional[cite: 18].
+            Kurikulum bertingkat yang dirancang terstruktur dari pengenalan air hingga persiapan kejuaraan profesional.
           </p>
         </div>
 
@@ -257,7 +308,7 @@ export default function Course() {
           {CATEGORIES.map((tab) => (
             <button
               key={tab.key}
-              onClick={() => setSelectedCategory(tab.key)}
+              onClick={() => handleCategoryChange(tab.key)}
               className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
                 selectedCategory === tab.key
                   ? "bg-cyan-400 text-slate-950 shadow-md shadow-cyan-400/20"
@@ -275,13 +326,13 @@ export default function Course() {
             <input
               type="text"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => handleSearchChange(e.target.value)}
               placeholder="Cari nama kelas atau materi pelatihan..."
               className="w-full pl-11 pr-10 py-3 bg-white/5 border border-white/10 rounded-2xl text-xs sm:text-sm text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-transparent transition-all backdrop-blur-md"
             />
             {searchQuery && (
               <button
-                onClick={() => setSearchQuery("")}
+                onClick={() => handleSearchChange("")}
                 className="absolute right-3 p-1 text-slate-400 hover:text-white rounded-full transition-colors"
                 title="Hapus pencarian"
               >
@@ -307,8 +358,8 @@ export default function Course() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 items-stretch">
-            {displayedCourses.map((c, idx) => {
-              const isPopular = idx === 1;
+            {displayedCourses.map((c) => {
+              const isHighlighted = highlightedCourseId === c.id;
               const categoryLabel =
                 CATEGORIES.find((opt) => opt.key === c.category?.toLowerCase())?.label ||
                 c.category;
@@ -316,15 +367,18 @@ export default function Course() {
               return (
                 <div
                   key={c.id}
-                  className={`relative rounded-[2.5rem] p-8 flex flex-col justify-between transition-all duration-300 group hover:-translate-y-2 ${
-                    isPopular
-                      ? "bg-gradient-to-b from-blue-900/60 to-[#0d223f] border-2 border-cyan-400/80 shadow-2xl shadow-cyan-500/10"
-                      : "bg-white/[0.03] hover:bg-white/[0.06] border border-white/10 hover:border-cyan-400/40 shadow-xl"
+                  id={`course-card-${c.id}`}
+                  onClick={() => setSelectedCourseModal(c)}
+                  className={`relative rounded-[2.5rem] p-8 flex flex-col justify-between transition-all duration-500 cursor-pointer scroll-mt-32 ${
+                    isHighlighted
+                      ? "bg-gradient-to-b from-[#0d2a52] to-[#0a1f3d] border-4 border-cyan-300 ring-8 ring-cyan-400/30 shadow-[0_0_60px_rgba(34,211,238,0.5)] scale-[1.03] z-20"
+                      : "bg-white/[0.03] hover:bg-white/[0.06] border border-white/10 hover:border-cyan-400/40 shadow-xl group hover:-translate-y-2"
                   }`}
                 >
-                  {isPopular && (
-                    <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 bg-gradient-to-r from-cyan-400 to-blue-500 text-[#0a192f] text-[10px] font-black uppercase tracking-widest px-4 py-1 rounded-full shadow-md">
-                      Paling Diminati
+                  {isHighlighted && (
+                    <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-cyan-300 text-slate-950 text-[11px] font-black uppercase tracking-wider px-5 py-1.5 rounded-full shadow-xl flex items-center gap-1.5 animate-bounce">
+                      <Flame size={14} className="text-amber-600 fill-amber-500" />
+                      <span>Kelas Pilihan Anda</span>
                     </div>
                   )}
 
@@ -332,8 +386,8 @@ export default function Course() {
                     <div className="flex items-center justify-between gap-4 mb-5">
                       <div
                         className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-colors ${
-                          isPopular
-                            ? "bg-cyan-400 text-slate-950 shadow-lg shadow-cyan-400/20"
+                          isHighlighted
+                            ? "bg-cyan-300 text-slate-950 shadow-lg shadow-cyan-300/40"
                             : "bg-white/10 text-cyan-400 group-hover:bg-cyan-400 group-hover:text-slate-950"
                         }`}
                       >
@@ -351,9 +405,9 @@ export default function Course() {
 
                     <div className="mb-3">
                       <span
-                        className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black tracking-wider uppercase border backdrop-blur-sm ${getCategoryBadgeClass(
+                        className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black tracking-wider uppercase border backdrop-blur-sm transition-colors ${getCategoryBadgeClass(
                           c.category,
-                          isPopular
+                          isHighlighted
                         )}`}
                       >
                         <Tag size={10} className="shrink-0" />
@@ -361,7 +415,13 @@ export default function Course() {
                       </span>
                     </div>
 
-                    <h4 className="text-xl font-bold text-white mb-2 tracking-tight group-hover:text-cyan-300 transition-colors">
+                    <h4
+                      className={`text-xl font-bold mb-2 tracking-tight transition-colors ${
+                        isHighlighted
+                          ? "text-cyan-300"
+                          : "text-white group-hover:text-cyan-300"
+                      }`}
+                    >
                       {c.title}
                     </h4>
 
@@ -383,13 +443,12 @@ export default function Course() {
                           <span>Target Pertemuan: <b>{c.max_sessions} Sesi Latihan</b></span>
                         </li>
 
-                        {/* Jadwal Latihan yang Sudah Diformat Aman */}
                         {c.schedule_info && (
                           <li className="flex items-center gap-2.5">
                             <div className="w-4 h-4 rounded-full bg-emerald-400/20 text-emerald-300 flex items-center justify-center shrink-0">
                               <Clock size={11} strokeWidth={3} />
                             </div>
-                            <span className="text-emerald-300 font-medium">
+                            <span className="text-emerald-300 font-medium truncate">
                               Jadwal: <b>{c.schedule_info}</b>
                             </span>
                           </li>
@@ -426,9 +485,10 @@ export default function Course() {
 
                   <a
                     href="/register"
+                    onClick={(e) => e.stopPropagation()}
                     className={`w-full py-3.5 px-4 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 transition-all active:scale-95 shadow-md ${
-                      isPopular
-                        ? "bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-black shadow-cyan-400/20"
+                      isHighlighted
+                        ? "bg-cyan-300 hover:bg-white text-slate-950 font-black shadow-lg shadow-cyan-300/40"
                         : "bg-white/10 hover:bg-white/20 text-white border border-white/10"
                     }`}
                   >
@@ -471,6 +531,139 @@ export default function Course() {
           </div>
         )}
       </div>
+
+      {selectedCourseModal && (
+        <div
+          onClick={() => setSelectedCourseModal(null)}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-[#0f2444] border border-cyan-500/30 rounded-[2.5rem] p-6 sm:p-8 max-w-xl w-full text-white shadow-2xl relative animate-in zoom-in-95 duration-200 max-h-[90vh] flex flex-col"
+          >
+            <div className="flex items-start justify-between gap-4 pb-4 border-b border-white/10 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-cyan-400 text-slate-950 flex items-center justify-center shrink-0 shadow-md shadow-cyan-400/20">
+                  {getIconElement(selectedCourseModal)}
+                </div>
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-cyan-300 px-2 py-0.5 rounded-full bg-cyan-950 border border-cyan-500/30">
+                    {selectedCourseModal.category}
+                  </span>
+                  <h3 className="text-xl font-bold text-white mt-1 tracking-tight">
+                    {selectedCourseModal.title}
+                  </h3>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedCourseModal(null)}
+                className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white transition-colors"
+                title="Tutup"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto py-5 space-y-5 custom-scrollbar flex-1 pr-1 text-xs sm:text-sm">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-cyan-300 mb-1.5">
+                  Deskripsi Program
+                </p>
+                <p className="text-slate-300 leading-relaxed whitespace-pre-wrap">
+                  {selectedCourseModal.description}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 p-4 rounded-2xl bg-white/5 border border-white/10">
+                <div>
+                  <span className="text-[10px] text-slate-400 uppercase font-bold block">Biaya Paket</span>
+                  <span className="text-base font-black text-white font-mono">
+                    {formatRupiah(selectedCourseModal.price)}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-400 uppercase font-bold block">Target Pertemuan</span>
+                  <span className="text-sm font-bold text-white">
+                    {selectedCourseModal.max_sessions} Sesi Latihan
+                  </span>
+                </div>
+                <div className="col-span-2 pt-2 border-t border-white/10 flex items-center justify-between">
+                  <span className="text-[10px] text-slate-400 uppercase font-bold">Kapasitas Kursi</span>
+                  <span className="text-xs font-semibold text-cyan-300">
+                    Sisa {selectedCourseModal.remaining_seats} dari {selectedCourseModal.max_capacity} Kuota
+                  </span>
+                </div>
+              </div>
+
+              {selectedCourseModal.schedule_info && (
+                <div className="p-3.5 rounded-2xl bg-emerald-950/40 border border-emerald-500/30 flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-300 flex items-center justify-center shrink-0">
+                    <Clock size={16} />
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider block">
+                      Jadwal Hari & Jam
+                    </span>
+                    <span className="text-xs font-bold text-emerald-200">
+                      {selectedCourseModal.schedule_info}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-cyan-300 mb-2.5">
+                  Fasilitas & Keunggulan
+                </p>
+                <div className="space-y-2">
+                  {selectedCourseModal.features && selectedCourseModal.features.length > 0 ? (
+                    selectedCourseModal.features.map((feat, idx) => (
+                      <div key={idx} className="flex items-center gap-2.5 text-slate-300 text-xs">
+                        <div className="w-4 h-4 rounded-full bg-cyan-400/20 text-cyan-300 flex items-center justify-center shrink-0">
+                          <Check size={11} strokeWidth={3} />
+                        </div>
+                        <span>{feat}</span>
+                      </div>
+                    ))
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2.5 text-slate-300 text-xs">
+                        <div className="w-4 h-4 rounded-full bg-cyan-400/20 text-cyan-300 flex items-center justify-center shrink-0">
+                          <Check size={11} strokeWidth={3} />
+                        </div>
+                        <span>Akses Presensi Kartu QR Digital Mandiri</span>
+                      </div>
+                      <div className="flex items-center gap-2.5 text-slate-300 text-xs">
+                        <div className="w-4 h-4 rounded-full bg-cyan-400/20 text-cyan-300 flex items-center justify-center shrink-0">
+                          <Check size={11} strokeWidth={3} />
+                        </div>
+                        <span>Bimbingan Instruktur Berlisensi Resmi</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-4 border-t border-white/10 flex items-center gap-3 shrink-0">
+              <button
+                type="button"
+                onClick={() => setSelectedCourseModal(null)}
+                className="flex-1 py-3.5 px-4 rounded-2xl text-xs font-bold text-slate-300 bg-white/5 hover:bg-white/10 transition-colors"
+              >
+                Tutup
+              </button>
+              <a
+                href="/register"
+                className="flex-1 py-3.5 px-4 rounded-2xl text-xs font-black text-slate-950 bg-cyan-400 hover:bg-cyan-300 transition-all flex items-center justify-center gap-2 shadow-lg shadow-cyan-400/20 active:scale-95"
+              >
+                Daftar Kelas Sekarang
+                <ChevronRight size={15} />
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

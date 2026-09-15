@@ -16,6 +16,7 @@ import {
   Hash,
   Camera,
   Trash2,
+  ArrowLeft,
 } from "lucide-react";
 
 // Helper: Kompresi gambar client-side menggunakan HTML5 Canvas
@@ -104,7 +105,7 @@ export default function Register() {
 
       const taken = new Set(
         (data || [])
-          .map((s) => parseInt(String(s.nis).replace(/\D/g, ""), 10))
+          .map((s) => parseInt(String(s.nis || "").replace(/\D/g, ""), 10))
           .filter((n) => !isNaN(n) && n > 0)
       );
 
@@ -320,20 +321,30 @@ export default function Register() {
           <p className="text-slate-500 font-medium mb-8 text-sm leading-relaxed">
             Data pendaftaran Anda telah tercatat dan sedang menunggu verifikasi oleh pengelola klub.
           </p>
-          <Link
-            to="/login"
-            className="w-full py-3.5 px-4 bg-slate-900 hover:bg-black text-white font-bold rounded-xl shadow-lg transition-all text-sm block"
-          >
-            Menuju Halaman Masuk
-          </Link>
+          <div className="w-full space-y-2.5">
+            <Link
+              to="/login"
+              className="w-full py-3.5 px-4 bg-slate-900 hover:bg-black text-white font-bold rounded-xl shadow-lg transition-all text-sm block"
+            >
+              Menuju Halaman Masuk
+            </Link>
+            <Link
+              to="/"
+              className="w-full py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-all text-xs flex items-center justify-center gap-1.5"
+            >
+              <ArrowLeft size={14} />
+              Kembali ke Halaman Utama
+            </Link>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#0a192f] flex items-center justify-center p-4 md:p-8 font-sans">
+    <div className="min-h-screen bg-[#0a192f] flex items-center justify-center p-4 md:p-8 font-sans relative">
       <Toaster position="top-center" />
+      
       <div className="w-full max-w-4xl bg-white rounded-[2rem] shadow-2xl overflow-hidden flex flex-col md:flex-row">
         <div className="hidden md:flex md:w-1/3 bg-blue-600 p-8 flex-col justify-between text-white">
           <div>
@@ -347,21 +358,41 @@ export default function Register() {
               Lengkapi formulir pendaftaran atlet untuk mendapatkan kartu digital dan jadwal latihan resmi klub.
             </p>
           </div>
-          <div>
-            <p className="text-xs font-medium text-blue-200">Sudah memiliki akun?</p>
-            <Link
-              to="/login"
-              className="inline-block mt-2 px-5 py-2 bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl text-xs font-bold transition-colors"
-            >
-              Masuk Sekarang
-            </Link>
+          <div className="space-y-3">
+            <div>
+              <p className="text-xs font-medium text-blue-200">Sudah memiliki akun?</p>
+              <Link
+                to="/login"
+                className="inline-block mt-2 px-5 py-2 bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl text-xs font-bold transition-colors"
+              >
+                Masuk Sekarang
+              </Link>
+            </div>
+            <div>
+              <Link
+                to="/"
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-100 hover:text-white transition-colors"
+              >
+                <ArrowLeft size={14} /> Kembali ke Halaman Utama
+              </Link>
+            </div>
           </div>
         </div>
 
         <div className="w-full md:w-2/3 p-6 md:p-8 flex flex-col justify-center">
-          <div className="md:hidden text-center mb-6">
-            <h1 className="text-xl font-black text-slate-800 tracking-tight">Pendaftaran Atlet</h1>
-            <p className="text-slate-500 text-xs mt-1">Lengkapi data diri Anda di bawah ini</p>
+          <div className="flex items-center justify-between mb-4 md:mb-6">
+            <div className="text-left">
+              <h1 className="text-xl md:text-2xl font-black text-slate-800 tracking-tight">Pendaftaran Atlet</h1>
+              <p className="text-slate-500 text-xs mt-0.5">Lengkapi data diri Anda di bawah ini</p>
+            </div>
+            <Link
+              to="/"
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-colors"
+              title="Kembali ke Beranda Utama"
+            >
+              <ArrowLeft size={14} />
+              <span className="hidden sm:inline">Halaman Utama</span>
+            </Link>
           </div>
 
           <form onSubmit={handleRegister} className="space-y-4">
@@ -626,7 +657,7 @@ export default function Register() {
             </div>
 
             <div className="md:hidden text-center mt-3">
-              <Link to="/login" className="text-xs text-blue-600 font-bold hover:underline">
+              <Link to="/login" className="text-xs text-blue-600 font-bold hover:underline block">
                 Sudah memiliki akun? Masuk di sini
               </Link>
             </div>

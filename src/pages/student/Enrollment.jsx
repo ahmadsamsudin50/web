@@ -384,7 +384,7 @@ export default function Enrollment() {
           Pendaftaran Kelas
         </h1>
         <p className="text-slate-500 mt-1 text-sm">
-          Pilih satu atau beberapa kelas latihan renang dan kirim konfirmasi transfer sekaligus[cite: 12].
+          Pilih satu atau beberapa kelas latihan renang dan kirim konfirmasi transfer sekaligus.
         </p>
       </div>
 
@@ -698,7 +698,7 @@ export default function Enrollment() {
               {payments.length === 0 && (
                 <div className="text-center py-12 text-slate-400">
                   <p className="text-sm font-bold text-slate-600">Belum ada riwayat pembayaran</p>
-                  <p className="text-xs mt-1">Pilih satu atau beberapa kelas untuk memulai pendaftaran[cite: 12].</p>
+                  <p className="text-xs mt-1">Pilih satu atau beberapa kelas untuk memulai pendaftaran.</p>
                 </div>
               )}
             </div>

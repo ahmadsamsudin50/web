@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { supabase } from "../utils/supabaseClient";
 import { useNavigate, Link } from "react-router-dom";
 import { toast, Toaster } from "react-hot-toast";
-import { Mail, Lock, Eye, EyeOff, ArrowRight, Loader2 } from "lucide-react";
+import { Mail, Lock, Eye, EyeOff, ArrowRight, Loader2, ArrowLeft, Home } from "lucide-react";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -69,7 +69,17 @@ export default function Login() {
 
       {/* Kartu Masuk */}
       <div className="w-full max-w-md bg-white rounded-[2.5rem] p-8 md:p-10 shadow-2xl relative z-10">
-        <div className="text-center mb-10">
+        {/* Tombol Cepat Kembali ke Halaman Utama (Pojok Kiri Atas) */}
+        <Link
+          to="/"
+          className="absolute top-6 left-6 p-2.5 rounded-2xl bg-slate-50 hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition-all active:scale-95 flex items-center gap-1.5 text-xs font-bold border border-slate-100"
+          title="Kembali ke Beranda"
+        >
+          <ArrowLeft size={16} />
+          <span className="hidden sm:inline">Beranda</span>
+        </Link>
+
+        <div className="text-center mb-10 pt-4 sm:pt-0">
           <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-5 shadow-lg shadow-blue-600/30 transform -rotate-3 hover:rotate-0 transition-transform duration-300 overflow-hidden">
             <img
               src="/sirip_biru.webp"
@@ -168,7 +178,15 @@ export default function Login() {
             </Link>
           </p>
 
-          <div className="border-t border-slate-100 pt-4">
+          <div className="border-t border-slate-100 pt-4 space-y-3">
+            <Link
+              to="/"
+              className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-blue-600 transition-colors"
+            >
+              <Home size={14} />
+              <span>Kembali ke Halaman Utama</span>
+            </Link>
+
             <p className="text-xs text-slate-400">
               Kesulitan mengakses akun?
               <br />

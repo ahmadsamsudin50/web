@@ -15,6 +15,7 @@ import {
   Trash2,
   AlertTriangle,
   Users,
+  UserCheck,
 } from "lucide-react";
 
 function CustomConfirmModal({
@@ -67,12 +68,14 @@ function CustomConfirmModal({
 export default function Recap() {
   const [logs, setLogs] = useState([]);
   const [classes, setClasses] = useState([]);
+  const [coaches, setCoaches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [attendeeType, setAttendeeType] = useState("student");
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterClass, setFilterClass] = useState("all");
-  const [studentScope, setStudentScope] = useState("all"); // 'all' atau 'completed_only'
+  const [filterCoach, setFilterCoach] = useState("all");
+  const [studentScope, setStudentScope] = useState("all");
   const [sortOrder, setSortOrder] = useState("desc");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -103,20 +106,19 @@ export default function Recap() {
     setConfirmState((prev) => ({ ...prev, isOpen: false, onConfirm: null }));
   };
 
-  // Mengambil daftar kelas untuk pilihan dropdown filter
   useEffect(() => {
-    const fetchClasses = async () => {
+    const fetchDropdownData = async () => {
       try {
-        const { data, error } = await supabase
-          .from("classes")
-          .select("id, name")
-          .order("name");
-        if (!error && data) {
-          setClasses(data);
-        }
+        const [clsRes, cchRes] = await Promise.all([
+          supabase.from("classes").select("id, name").order("name"),
+          supabase.from("coaches").select("id, specialty, users(full_name)").order("created_at"),
+        ]);
+
+        if (clsRes.data) setClasses(clsRes.data);
+        if (cchRes.data) setCoaches(cchRes.data);
       } catch (_) {}
     };
-    fetchClasses();
+    fetchDropdownData();
   }, []);
 
   const fetchLogs = async (type) => {
@@ -143,8 +145,8 @@ export default function Recap() {
         const { data, error } = await supabase
           .from("attendance_logs")
           .select(`
-            id, status, scanned_at,
-            coaches ( specialty, users ( full_name ) ),
+            id, status, scanned_at, coach_id,
+            coaches ( id, specialty, users ( full_name ) ),
             sessions ( name, session_date )
           `)
           .not("coach_id", "is", null)
@@ -166,13 +168,24 @@ export default function Recap() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, filterStatus, filterClass, sortOrder, attendeeType, dateFrom, dateTo, studentScope]);
+  }, [
+    searchQuery,
+    filterStatus,
+    filterClass,
+    filterCoach,
+    sortOrder,
+    attendeeType,
+    dateFrom,
+    dateTo,
+    studentScope,
+  ]);
 
   const handleTypeChange = (type) => {
     setAttendeeType(type);
     setSearchQuery("");
     setFilterStatus("all");
     setFilterClass("all");
+    setFilterCoach("all");
     setStudentScope("all");
     setSortOrder("desc");
     setDateFrom("");
@@ -180,7 +193,6 @@ export default function Recap() {
     setLogs([]);
   };
 
-  // Helper memeriksa apakah seluruh pendaftaran atlet telah berstatus completed
   const isStudentCompletedAll = (log) => {
     const enrollments = log.students?.student_enrollments;
     if (!enrollments || enrollments.length === 0) return false;
@@ -189,9 +201,14 @@ export default function Recap() {
 
   let processedLogs = [...logs];
 
-  // Filter Sub-navbar: Atlet Masa Latihan Habis
   if (attendeeType === "student" && studentScope === "completed_only") {
     processedLogs = processedLogs.filter((log) => isStudentCompletedAll(log));
+  }
+
+  if (attendeeType === "coach" && filterCoach !== "all") {
+    processedLogs = processedLogs.filter(
+      (log) => log.coach_id === filterCoach || log.coaches?.id === filterCoach
+    );
   }
 
   if (searchQuery) {
@@ -256,7 +273,6 @@ export default function Recap() {
     return status ? status.replace("_", " ") : "-";
   };
 
-  // Hapus Satu Rekaman Kehadiran
   const handleDeleteSingleLog = (log) => {
     triggerConfirm({
       title: "Hapus Log Kehadiran?",
@@ -282,7 +298,6 @@ export default function Recap() {
     });
   };
 
-  // Hapus Semua Rekaman Log yang Ditampilkan (Khusus Atlet Habis Masa Latihan)
   const handleDeleteAllCompletedLogs = () => {
     const targetIds = processedLogs.map((l) => l.id);
     if (targetIds.length === 0) return;
@@ -314,10 +329,11 @@ export default function Recap() {
   const handleExportExcel = () => {
     const loadingToast = toast.loading("Menyiapkan dokumen Excel...");
     try {
-      const excelData = processedLogs.map((log) => {
+      const excelData = processedLogs.map((log, index) => {
         const dateObj = new Date(log.scanned_at);
         if (attendeeType === "student") {
           return {
+            "No.": index + 1,
             "Tanggal": dateObj.toLocaleDateString("id-ID"),
             "Waktu": dateObj.toLocaleTimeString("id-ID"),
             "NIS": log.students?.nis || "-",
@@ -329,6 +345,7 @@ export default function Recap() {
           };
         } else {
           return {
+            "No.": index + 1,
             "Tanggal": dateObj.toLocaleDateString("id-ID"),
             "Waktu": dateObj.toLocaleTimeString("id-ID"),
             "Nama Pelatih": log.coaches?.users?.full_name || "Tidak diketahui",
@@ -371,6 +388,7 @@ export default function Recap() {
     searchQuery ||
     filterStatus !== "all" ||
     (attendeeType === "student" && filterClass !== "all") ||
+    (attendeeType === "coach" && filterCoach !== "all") ||
     dateFrom ||
     dateTo ||
     (attendeeType === "student" && studentScope !== "all");
@@ -379,12 +397,12 @@ export default function Recap() {
     setSearchQuery("");
     setFilterStatus("all");
     setFilterClass("all");
+    setFilterCoach("all");
     setStudentScope("all");
     setDateFrom("");
     setDateTo("");
   };
 
-  // Jumlah atlet habis masa latihan pada rekaman log
   const completedStudentLogsCount = useMemo(() => {
     if (attendeeType !== "student") return 0;
     return logs.filter((l) => isStudentCompletedAll(l)).length;
@@ -410,7 +428,7 @@ export default function Recap() {
             Rekapitulasi Kehadiran
           </h1>
           <p className="text-slate-500 mt-1 text-sm">
-            Tinjau, saring, dan ekspor riwayat presensi latihan Siripbiru[cite: 14].
+            Tinjau, saring, dan ekspor riwayat presensi latihan Siripbiru[cite: 22].
           </p>
         </div>
         <button
@@ -422,7 +440,7 @@ export default function Recap() {
         </button>
       </div>
 
-      {/* Navigasi Filter Kategori Atlet & Status Masa Belajar */}
+      {/* Navigasi Filter Kategori & Sub-Navbar */}
       <div className="max-w-7xl mx-auto mb-4 flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center justify-between">
         <div className="flex gap-2 p-1.5 bg-white border border-slate-200 rounded-2xl shadow-sm overflow-x-auto">
           <button
@@ -443,11 +461,11 @@ export default function Recap() {
                 : "text-slate-600 hover:bg-slate-50"
             }`}
           >
-            Rekap Pelatih
+            <UserCheck size={15} /> Rekap Pelatih
           </button>
         </div>
 
-        {/* Sub-Filter Khusus Atlet: Semua vs Masa Belajar Habis */}
+        {/* Sub-Filter Atlet */}
         {attendeeType === "student" && (
           <div className="flex items-center gap-2">
             <div className="flex gap-1.5 p-1 bg-slate-100 border border-slate-200/80 rounded-xl overflow-x-auto">
@@ -482,7 +500,6 @@ export default function Recap() {
               </button>
             </div>
 
-            {/* Tombol Hapus Semua Log untuk Atlet yang Habis Masa Latihan */}
             {studentScope === "completed_only" && processedLogs.length > 0 && (
               <button
                 onClick={handleDeleteAllCompletedLogs}
@@ -493,6 +510,27 @@ export default function Recap() {
                 <span>Hapus Semua ({processedLogs.length})</span>
               </button>
             )}
+          </div>
+        )}
+
+        {/* Sub-Navbar Pelatih */}
+        {attendeeType === "coach" && (
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-xl shadow-xs">
+              <UserCheck size={14} className="text-blue-600 shrink-0" />
+              <select
+                value={filterCoach}
+                onChange={(e) => setFilterCoach(e.target.value)}
+                className="text-xs font-bold text-slate-700 bg-transparent outline-none cursor-pointer"
+              >
+                <option value="all">Semua Pelatih</option>
+                {coaches.map((cch) => (
+                  <option key={cch.id} value={cch.id}>
+                    {cch.users?.full_name || "Pelatih"} {cch.specialty ? `(${cch.specialty})` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
         )}
       </div>
@@ -573,9 +611,10 @@ export default function Recap() {
 
       <div className="max-w-7xl mx-auto">
         <div className="hidden md:block bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-          <table className="w-full text-left border-collapse min-w-[750px]">
+          <table className="w-full text-left border-collapse min-w-[800px]">
             <thead>
               <tr className="bg-slate-50 text-slate-400 text-[10px] uppercase tracking-wider font-bold border-b border-slate-100">
+                <th className="px-4 py-4 w-14 text-center">No.</th>
                 <th className="px-6 py-4">Waktu Pindai</th>
                 <th className="px-6 py-4">Nama Peserta</th>
                 <th className="px-6 py-4">Sesi & Kelas</th>
@@ -586,7 +625,8 @@ export default function Recap() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
-              {paginatedLogs.map((log) => {
+              {paginatedLogs.map((log, index) => {
+                const rowNumber = (currentPage - 1) * ITEMS_PER_PAGE + index + 1;
                 const scanDate = new Date(log.scanned_at);
                 const dateStr = scanDate.toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
                 const timeStr = scanDate.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
@@ -594,6 +634,9 @@ export default function Recap() {
 
                 return (
                   <tr key={log.id} className="hover:bg-slate-50/50">
+                    <td className="px-4 py-4 text-center font-mono font-bold text-slate-400">
+                      {rowNumber}
+                    </td>
                     <td className="px-6 py-4 text-slate-600 font-medium">
                       {dateStr} • {timeStr} WIB
                     </td>
@@ -629,7 +672,6 @@ export default function Recap() {
                       </span>
                     </td>
 
-                    {/* Tombol Hapus Satuan hanya muncul saat atlet berstatus masa latihan habis */}
                     {attendeeType === "student" && studentScope === "completed_only" && (
                       <td className="px-6 py-4 text-right">
                         <button
@@ -649,8 +691,10 @@ export default function Recap() {
           </table>
         </div>
 
+        {/* Tampilan Mobile */}
         <div className="md:hidden space-y-3">
-          {paginatedLogs.map((log) => {
+          {paginatedLogs.map((log, index) => {
+            const rowNumber = (currentPage - 1) * ITEMS_PER_PAGE + index + 1;
             const scanDate = new Date(log.scanned_at);
             const dateStr = scanDate.toLocaleDateString("id-ID", { day: "numeric", month: "short" });
             const timeStr = scanDate.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
@@ -659,18 +703,23 @@ export default function Recap() {
             return (
               <div key={log.id} className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-2">
                 <div className="flex justify-between items-start">
-                  <div>
-                    <div className="flex items-center gap-1.5">
-                      <h3 className="font-bold text-slate-800 text-sm">
-                        {attendeeType === "student" ? log.students?.users?.full_name : log.coaches?.users?.full_name}
-                      </h3>
-                      {isCompleted && (
-                        <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase bg-amber-100 text-amber-900 border border-amber-300">
-                          Habis
-                        </span>
-                      )}
+                  <div className="flex items-start gap-2.5">
+                    <span className="w-6 h-6 rounded-lg bg-slate-100 text-slate-500 font-mono font-bold text-xs flex items-center justify-center shrink-0">
+                      {rowNumber}
+                    </span>
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <h3 className="font-bold text-slate-800 text-sm">
+                          {attendeeType === "student" ? log.students?.users?.full_name : log.coaches?.users?.full_name}
+                        </h3>
+                        {isCompleted && (
+                          <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase bg-amber-100 text-amber-900 border border-amber-300">
+                            Habis
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-400">{log.sessions?.name}</p>
                     </div>
-                    <p className="text-xs text-slate-400">{log.sessions?.name}</p>
                   </div>
                   <span className={`px-2 py-0.5 rounded-lg text-[9px] font-black uppercase border ${getStatusBadgeStyle(log.status)}`}>
                     {getStatusLabel(log.status)}
@@ -700,7 +749,7 @@ export default function Recap() {
         {paginatedLogs.length === 0 && !loading && (
           <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-400 shadow-sm">
             <p className="font-bold text-slate-700 text-sm">Tidak ada rekaman kehadiran</p>
-            <p className="text-xs mt-1">Coba sesuaikan kata kunci pencarian atau opsi filter status[cite: 14].</p>
+            <p className="text-xs mt-1">Coba sesuaikan kata kunci pencarian atau opsi filter status[cite: 22].</p>
           </div>
         )}
 

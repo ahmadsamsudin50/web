@@ -768,9 +768,10 @@ export default function StudentManage() {
       {/* Tabel Data Atlet */}
       <div className="max-w-7xl mx-auto bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[950px]">
+          <table className="w-full text-left border-collapse min-w-[980px]">
             <thead>
               <tr className="bg-slate-50 text-slate-400 text-[10px] uppercase tracking-wider font-bold border-b border-slate-100">
+                <th className="px-4 py-3.5 w-14 text-center">No.</th>
                 <th className="px-5 py-3.5">Identitas Atlet</th>
                 <th className="px-5 py-3.5 min-w-[240px]">Status Kelas & Pertemuan</th>
                 <th className="px-5 py-3.5">Nama Orang Tua / Usia</th>
@@ -779,8 +780,11 @@ export default function StudentManage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
-              {processedStudents.map((s) => (
+              {processedStudents.map((s, index) => (
                 <tr key={s.id} className="hover:bg-slate-50/50">
+                  <td className="px-4 py-4 text-center font-mono font-bold text-slate-400">
+                    {index + 1}
+                  </td>
                   <td className="px-5 py-4">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-xl bg-blue-50 border border-slate-200 flex items-center justify-center font-bold text-xs shrink-0 overflow-hidden">
@@ -913,13 +917,86 @@ export default function StudentManage() {
 
               {processedStudents.length === 0 && !loading && (
                 <tr>
-                  <td colSpan="5" className="py-12 text-center text-slate-400">
+                  <td colSpan="6" className="py-12 text-center text-slate-400">
                     Tidak ada data atlet pada kategori ini.
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Tampilan Mobile */}
+        <div className="md:hidden divide-y divide-slate-100 p-3 space-y-3">
+          {processedStudents.map((s, index) => (
+            <div key={s.id} className="pt-3 first:pt-0 space-y-2.5">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-start gap-2.5">
+                  <span className="w-6 h-6 rounded-lg bg-slate-100 text-slate-500 font-mono font-bold text-xs flex items-center justify-center shrink-0 mt-0.5">
+                    {index + 1}
+                  </span>
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-10 h-10 rounded-xl bg-blue-50 border border-slate-200 flex items-center justify-center font-bold text-xs shrink-0 overflow-hidden">
+                      {s.avatar_url ? (
+                        <img src={s.avatar_url} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        <User size={18} className="text-blue-600" />
+                      )}
+                    </div>
+                    <div>
+                      <div className="font-bold text-slate-800 text-sm">
+                        {s.users?.full_name || "Tanpa Nama"}
+                      </div>
+                      <div className="text-slate-400 font-mono text-[11px]">NIS: {s.nis}</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1">
+                  {activeTab === "pending" ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => handleApprovalAction(s.user_id, "active", s.users?.full_name)}
+                        className="px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-bold"
+                      >
+                        Setujui
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleApprovalAction(s.user_id, "rejected", s.users?.full_name)}
+                        className="px-2.5 py-1 bg-rose-50 text-rose-700 rounded-lg text-xs font-bold"
+                      >
+                        Tolak
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => openEditModal(s)}
+                        className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg"
+                      >
+                        <Edit2 size={15} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteStudent(s)}
+                        className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <div className="text-[11px] text-slate-500 pl-8 space-y-1">
+                <div>Orang Tua: <span className="font-semibold text-slate-700">{s.parent_name || "-"}</span></div>
+                <div>Kontak: <span className="font-semibold text-slate-700">{s.phone_number || "-"}</span></div>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 

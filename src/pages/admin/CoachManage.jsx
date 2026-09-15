@@ -187,7 +187,7 @@ export default function CoachManage() {
     setForm({
       full_name: c.users?.full_name || "",
       email: c.users?.email || "",
-      password: c.users?.password || "", // Menampilkan kata sandi dari database
+      password: c.users?.password || "",
       specialty: c.specialty || "",
       phone_number: c.phone_number || "",
       nickname: c.nickname || "",
@@ -510,9 +510,10 @@ export default function CoachManage() {
           </span>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[750px]">
+          <table className="w-full text-left border-collapse min-w-[780px]">
             <thead>
               <tr className="bg-slate-50/50 text-slate-400 text-[10px] uppercase tracking-wider font-bold border-b border-slate-100">
+                <th className="px-4 py-3.5 w-14 text-center">No.</th>
                 <th className="px-6 py-3.5">Identitas & Foto</th>
                 <th className="px-6 py-3.5">Spesialisasi & Kontak</th>
                 <th className="px-6 py-3.5 text-center">Publikasi Halaman Depan</th>
@@ -520,8 +521,11 @@ export default function CoachManage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
-              {filteredCoaches.map((c) => (
+              {filteredCoaches.map((c, index) => (
                 <tr key={c.id} className="hover:bg-slate-50/50">
+                  <td className="px-4 py-4 text-center font-mono font-bold text-slate-400">
+                    {index + 1}
+                  </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
                       <div className="w-12 h-12 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0 overflow-hidden shadow-sm">
@@ -582,7 +586,7 @@ export default function CoachManage() {
               ))}
               {filteredCoaches.length === 0 && !loading && (
                 <tr>
-                  <td colSpan="4" className="py-12 text-center text-slate-400">
+                  <td colSpan="5" className="py-12 text-center text-slate-400">
                     Tidak ada pelatih yang ditemukan.
                   </td>
                 </tr>
