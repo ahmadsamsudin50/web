@@ -428,7 +428,7 @@ export default function Recap() {
             Rekapitulasi Kehadiran
           </h1>
           <p className="text-slate-500 mt-1 text-sm">
-            Tinjau, saring, dan ekspor riwayat presensi latihan Siripbiru[cite: 22].
+            Tinjau, saring, dan ekspor riwayat presensi latihan Siripbiru.
           </p>
         </div>
         <button
@@ -749,7 +749,7 @@ export default function Recap() {
         {paginatedLogs.length === 0 && !loading && (
           <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-400 shadow-sm">
             <p className="font-bold text-slate-700 text-sm">Tidak ada rekaman kehadiran</p>
-            <p className="text-xs mt-1">Coba sesuaikan kata kunci pencarian atau opsi filter status[cite: 22].</p>
+            <p className="text-xs mt-1">Coba sesuaikan kata kunci pencarian atau opsi filter status.</p>
           </div>
         )}
 
