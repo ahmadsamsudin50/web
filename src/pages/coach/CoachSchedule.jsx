@@ -281,7 +281,7 @@ export default function CoachSchedule() {
           Jadwal Tugas Melatih
         </h1>
         <p className="text-slate-500 mt-1 text-sm">
-          Daftar sesi latihan renang yang ditugaskan khusus untuk Anda pantau[cite: 10].
+          Daftar sesi latihan renang yang ditugaskan khusus untuk Anda pantau.
         </p>
       </div>
 
@@ -484,7 +484,7 @@ export default function CoachSchedule() {
                     Daftar Murid: {studentsModal.session?.name}
                   </h3>
                   <p className="text-[11px] text-slate-500">
-                    Daftar siswa dan nomor kontak wali pada sesi ini[cite: 10]
+                    Daftar siswa dan nomor kontak wali pada sesi ini
                   </p>
                 </div>
               </div>
