@@ -187,13 +187,13 @@ export default function Profile() {
       if (profileResult.error) throw profileResult.error;
       setStudentData(profileResult.data);
 
-      // Ambil akumulasi log presensi per enrollment spesifik
+      // Ambil akumulasi log presensi per enrollment spesifik (menghitung hadir_qr, hadir_manual, dan alpa)
       if (profileResult.data?.id) {
         const { data: logs, error: logsError } = await supabase
           .from("attendance_logs")
           .select("enrollment_id, status")
           .eq("student_id", profileResult.data.id)
-          .in("status", ["hadir_qr", "hadir_manual"]);
+          .in("status", ["hadir_qr", "hadir_manual", "alpa"]);
 
         if (!logsError && logs) {
           const counts = {};
@@ -641,7 +641,7 @@ export default function Profile() {
 
       {/* Modal Layar Penuh QR Code */}
       {isFullscreenQrOpen && (
-        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center p-4 bg-black/90 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white rounded-[2.5rem] p-8 max-w-sm w-full flex flex-col items-center text-center shadow-2xl relative">
             <button
               type="button"

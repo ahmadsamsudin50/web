@@ -15,6 +15,8 @@ import {
   Layers,
   Power,
   User,
+  AlertCircle,
+  CheckCircle2,
 } from "lucide-react";
 
 const TABS = [
@@ -27,6 +29,7 @@ export default function Schedule() {
   const [sessions, setSessions] = useState([]);
   const [coachesMap, setCoachesMap] = useState({});
   const [classesMap, setClassesMap] = useState({});
+  const [attendanceMap, setAttendanceMap] = useState({});
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("upcoming");
   const [searchQuery, setSearchQuery] = useState("");
@@ -74,6 +77,18 @@ export default function Schedule() {
             if (!session.class_ids) return false;
             return session.class_ids.some((cId) => activeClassIds.includes(cId));
           });
+
+          // Ambil log kehadiran atlet untuk sesi-sesi tersebut
+          const { data: logsData } = await supabase
+            .from("attendance_logs")
+            .select("session_id, status")
+            .eq("student_id", studentData.id);
+
+          const aMap = {};
+          (logsData || []).forEach((log) => {
+            aMap[log.session_id] = log.status;
+          });
+          setAttendanceMap(aMap);
         }
 
         // 2. Ambil data pelatih termasuk photo_url dari storage
@@ -222,6 +237,9 @@ export default function Schedule() {
                 ?.map((cId) => classesMap[cId])
                 .filter(Boolean) || [];
 
+              const loggedStatus = attendanceMap[session.id];
+              const isSessionClosed = !session.is_active;
+
               return (
                 <div key={session.id} className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4 hover:shadow-md transition-shadow">
                   <div className="flex items-start justify-between gap-3">
@@ -250,6 +268,33 @@ export default function Schedule() {
                         <Power size={10} />
                         {session.is_active ? "Gerbang Dibuka" : "Ditutup"}
                       </span>
+
+                      {/* Tag Kehadiran Personal Atlet */}
+                      {loggedStatus ? (
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold border ${
+                          loggedStatus.includes("hadir")
+                            ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                            : loggedStatus === "alpa"
+                            ? "bg-rose-50 text-rose-700 border-rose-200"
+                            : "bg-blue-50 text-blue-700 border-blue-200"
+                        }`}>
+                          {loggedStatus.includes("hadir") ? (
+                            <CheckCircle2 size={10} />
+                          ) : (
+                            <AlertCircle size={10} />
+                          )}
+                          <span>
+                            {loggedStatus === "alpa"
+                              ? "Alpa (Terhitung Sesi)"
+                              : loggedStatus.replace("_", " ").toUpperCase()}
+                          </span>
+                        </span>
+                      ) : isSessionClosed ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                          <AlertCircle size={10} />
+                          <span>Alpa (Terhitung Sesi)</span>
+                        </span>
+                      ) : null}
 
                       {/* Tag Kelas Aktif Terkait */}
                       <div className="flex flex-wrap gap-1 justify-end">

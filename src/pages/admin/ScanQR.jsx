@@ -150,12 +150,12 @@ export default function ScanQR() {
       ]);
       if (logError) throw logError;
 
-      // 3. Hitung akumulasi kehadiran valid murid pada kelas ini
+      // 3. Hitung akumulasi kehadiran valid murid pada kelas ini (hadir fisik + alpa terhitung sesi, izin & sakit bebas)
       const { count: attendCount, error: countErr } = await supabase
         .from("attendance_logs")
         .select("*", { count: "exact", head: true })
         .eq("enrollment_id", enrollment.id)
-        .in("status", ["hadir_qr", "hadir_manual"]);
+        .in("status", ["hadir_qr", "hadir_manual", "alpa"]);
 
       if (countErr) throw countErr;
 
@@ -504,7 +504,7 @@ export default function ScanQR() {
         <div className="md:col-span-2">
           <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-sm min-h-[460px] flex flex-col relative overflow-hidden">
             
-            {/* Header Jendela Kamera - Posisikan Rapi di Kiri Atas */}
+            {/* Header Jendela Kamera */}
             <div className="w-full flex items-center justify-between border-b border-slate-100 pb-4 mb-4">
               <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
                 <Camera size={16} className="text-blue-600" /> Jendela Kamera
@@ -562,7 +562,7 @@ export default function ScanQR() {
                 )}
               </div>
             ) : (
-              /* State Tampilan Kosong (Dead-Center Sempurna) */
+              /* State Tampilan Kosong */
               <div className="flex-1 w-full flex flex-col items-center justify-center text-center p-6 my-auto">
                 <div className="w-16 h-16 rounded-2xl bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-300 mb-4 shadow-sm">
                   <Video size={32} />

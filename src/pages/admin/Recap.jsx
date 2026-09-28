@@ -331,6 +331,10 @@ export default function Recap() {
     try {
       const excelData = processedLogs.map((log, index) => {
         const dateObj = new Date(log.scanned_at);
+        const s = (log.status || "").toLowerCase();
+        const isQuotaCounted = s.includes("hadir") || s === "alpa";
+        const quotaInfo = isQuotaCounted ? "Memotong Kuota Sesi" : "Dikecualikan (Tidak Memotong)";
+
         if (attendeeType === "student") {
           return {
             "No.": index + 1,
@@ -341,6 +345,7 @@ export default function Recap() {
             "Kelas": log.student_enrollments?.classes?.name || "-",
             "Sesi Latihan": log.sessions?.name || "-",
             "Status Kehadiran": getStatusLabel(log.status),
+            "Pengaruh Sesi": quotaInfo,
             "Status Kelulusan": isStudentCompletedAll(log) ? "Masa Belajar Habis" : "Aktif",
           };
         } else {
@@ -352,6 +357,7 @@ export default function Recap() {
             "Spesialisasi": log.coaches?.specialty || "-",
             "Sesi Latihan": log.sessions?.name || "-",
             "Status Kehadiran": getStatusLabel(log.status),
+            "Pengaruh Sesi": quotaInfo,
           };
         }
       });
@@ -631,6 +637,7 @@ export default function Recap() {
                 const dateStr = scanDate.toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
                 const timeStr = scanDate.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
                 const isCompleted = attendeeType === "student" && isStudentCompletedAll(log);
+                const isAlpa = log.status === "alpa";
 
                 return (
                   <tr key={log.id} className="hover:bg-slate-50/50">
@@ -667,9 +674,16 @@ export default function Recap() {
                       )}
                     </td>
                     <td className="px-6 py-4 text-center">
-                      <span className={`inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border ${getStatusBadgeStyle(log.status)}`}>
-                        {getStatusLabel(log.status)}
-                      </span>
+                      <div className="inline-flex flex-col items-center gap-0.5">
+                        <span className={`inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border ${getStatusBadgeStyle(log.status)}`}>
+                          {getStatusLabel(log.status)}
+                        </span>
+                        {isAlpa && (
+                          <span className="text-[9px] font-bold text-rose-600">
+                            (Potong Sesi)
+                          </span>
+                        )}
+                      </div>
                     </td>
 
                     {attendeeType === "student" && studentScope === "completed_only" && (
@@ -699,6 +713,7 @@ export default function Recap() {
             const dateStr = scanDate.toLocaleDateString("id-ID", { day: "numeric", month: "short" });
             const timeStr = scanDate.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
             const isCompleted = attendeeType === "student" && isStudentCompletedAll(log);
+            const isAlpa = log.status === "alpa";
 
             return (
               <div key={log.id} className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-2">
@@ -721,9 +736,16 @@ export default function Recap() {
                       <p className="text-xs text-slate-400">{log.sessions?.name}</p>
                     </div>
                   </div>
-                  <span className={`px-2 py-0.5 rounded-lg text-[9px] font-black uppercase border ${getStatusBadgeStyle(log.status)}`}>
-                    {getStatusLabel(log.status)}
-                  </span>
+                  <div className="flex flex-col items-end gap-0.5">
+                    <span className={`px-2 py-0.5 rounded-lg text-[9px] font-black uppercase border ${getStatusBadgeStyle(log.status)}`}>
+                      {getStatusLabel(log.status)}
+                    </span>
+                    {isAlpa && (
+                      <span className="text-[8px] font-bold text-rose-600">
+                        Potong Sesi
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div className="flex justify-between items-center text-[11px] text-slate-400 pt-1 border-t border-slate-100">
                   <span>{attendeeType === "student" ? log.student_enrollments?.classes?.name : log.coaches?.specialty}</span>

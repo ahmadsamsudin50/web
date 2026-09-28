@@ -125,6 +125,11 @@ export default function History() {
     return status ? status.replace("_", " ") : "-";
   };
 
+  // Ringkasan status terhitung vs status bebas kuota
+  const countedSessions = logs.filter((l) =>
+    ["hadir_qr", "hadir_manual", "alpa"].includes(l.status?.toLowerCase())
+  ).length;
+
   if (loading) {
     return (
       <div className="min-h-[70vh] flex flex-col items-center justify-center">
@@ -148,8 +153,13 @@ export default function History() {
             Lacak catatan latihan renang dan ringkasan kehadiran Anda.
           </p>
         </div>
-        <div className="bg-blue-50 text-blue-700 px-5 py-3 rounded-2xl text-sm font-bold border border-blue-100 shadow-sm w-fit">
-          Total Rekaman: {processedLogs.length}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="bg-slate-100 text-slate-700 px-4 py-2.5 rounded-2xl text-xs font-bold border border-slate-200 shadow-sm">
+            Total Sesi Terhitung: <span className="text-blue-700 font-black">{countedSessions}</span>
+          </div>
+          <div className="bg-blue-50 text-blue-700 px-4 py-2.5 rounded-2xl text-xs font-bold border border-blue-100 shadow-sm">
+            Total Rekaman: <span className="text-blue-900 font-black">{processedLogs.length}</span>
+          </div>
         </div>
       </div>
 

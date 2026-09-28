@@ -162,9 +162,28 @@ export default function CoachSchedule() {
       }
 
       if (enrollRes.error) throw enrollRes.error;
+
+      // Ambil riwayat absensi pada sesi ini untuk mengetahui status murid
+      const { data: logsData } = await supabase
+        .from("attendance_logs")
+        .select("student_id, status")
+        .eq("session_id", session.id);
+
+      const statusMap = {};
+      (logsData || []).forEach((l) => {
+        if (l.student_id) {
+          statusMap[l.student_id] = l.status;
+        }
+      });
+
+      const mappedStudents = (enrollRes.data || []).map((item) => ({
+        ...item,
+        attendanceStatus: statusMap[item.students?.id] || (session.is_active ? "belum_absen" : "alpa"),
+      }));
+
       setStudentsModal((prev) => ({
         ...prev,
-        students: enrollRes.data || [],
+        students: mappedStudents,
         loading: false,
       }));
     } catch (err) {
@@ -231,6 +250,50 @@ export default function CoachSchedule() {
     const className = item.classes?.name?.toLowerCase() || "";
     return name.includes(q) || nis.includes(q) || parent.includes(q) || className.includes(q);
   });
+
+  const getAttendanceBadge = (status) => {
+    if (!status || status === "belum_absen") {
+      return (
+        <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
+          Belum Absen
+        </span>
+      );
+    }
+    const s = status.toLowerCase();
+    if (s.includes("hadir")) {
+      return (
+        <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+          Hadir
+        </span>
+      );
+    }
+    if (s === "izin") {
+      return (
+        <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+          Izin
+        </span>
+      );
+    }
+    if (s === "sakit") {
+      return (
+        <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+          Sakit
+        </span>
+      );
+    }
+    if (s === "alpa") {
+      return (
+        <span className="px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-rose-50 text-rose-700 border border-rose-200" title="Terhitung memotong kuota sesi">
+          Alpa (Terhitung Sesi)
+        </span>
+      );
+    }
+    return (
+      <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
+        {status.replace("_", " ")}
+      </span>
+    );
+  };
 
   if (loading) {
     return (
@@ -567,9 +630,12 @@ export default function CoachSchedule() {
                         </div>
 
                         <div className="min-w-0">
-                          <h4 className="font-bold text-slate-800 text-xs truncate">
-                            {studentName}
-                          </h4>
+                          <div className="flex items-center gap-2">
+                            <h4 className="font-bold text-slate-800 text-xs truncate">
+                              {studentName}
+                            </h4>
+                            {getAttendanceBadge(item.attendanceStatus)}
+                          </div>
                           <div className="flex items-center gap-2 text-[10px] text-slate-500 mt-0.5">
                             <span className="font-mono font-semibold text-blue-600">
                               NIS: {item.students?.nis}

@@ -303,12 +303,12 @@ export default function ManualEntry() {
             ]);
           }
 
-          // Sinkronisasi status kelulusan dua arah (P2)
+          // Sinkronisasi status kelulusan dua arah: menghitung hadir_qr, hadir_manual, dan alpa (izin dan sakit tetap dikecualikan)
           const { count: validAttendCount } = await supabase
             .from("attendance_logs")
             .select("*", { count: "exact", head: true })
             .eq("enrollment_id", item.enrollmentId)
-            .in("status", ["hadir_qr", "hadir_manual"]);
+            .in("status", ["hadir_qr", "hadir_manual", "alpa"]);
 
           const totalAttend = validAttendCount || 0;
 
@@ -322,7 +322,7 @@ export default function ManualEntry() {
               })
               .eq("id", item.enrollmentId);
           } else {
-            // Kehadiran di bawah target (misalnya status diubah ke izin/sakit/alpa) -> Kembalikan ke active
+            // Sesi di bawah target (misalnya status dikoreksi ke izin/sakit) -> Kembalikan ke active
             await supabase
               .from("student_enrollments")
               .update({

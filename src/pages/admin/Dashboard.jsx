@@ -32,6 +32,7 @@ export default function Dashboard() {
     students: 0,
     activeSessions: 0,
     totalLogs: 0,
+    countedLogs: 0,
   });
 
   const [storageUsage, setStorageUsage] = useState({
@@ -93,11 +94,13 @@ export default function Dashboard() {
         { count: studentCount },
         { count: sessionCount },
         { count: logCount },
+        { count: countedLogCount },
       ] = await Promise.all([
         supabase.from("classes").select("*", { count: "exact", head: true }),
         supabase.from("students").select("*", { count: "exact", head: true }),
         supabase.from("sessions").select("*", { count: "exact", head: true }),
         supabase.from("attendance_logs").select("*", { count: "exact", head: true }),
+        supabase.from("attendance_logs").select("*", { count: "exact", head: true }).in("status", ["hadir_qr", "hadir_manual", "alpa"]),
       ]);
 
       setStats({
@@ -105,6 +108,7 @@ export default function Dashboard() {
         students: studentCount || 0,
         activeSessions: sessionCount || 0,
         totalLogs: logCount || 0,
+        countedLogs: countedLogCount || 0,
       });
 
       // 2. Hitung Penggunaan Berkas Storage
@@ -142,10 +146,11 @@ export default function Dashboard() {
         console.warn("Database metrics warning:", err);
       }
 
-      // 4. Tren Kehadiran
+      // 4. Tren Kehadiran & Sesi Terhitung (hadir_qr, hadir_manual, alpa)
       const { data: logs } = await supabase
         .from("attendance_logs")
-        .select(`id, sessions(session_date)`);
+        .select(`id, status, sessions(session_date)`)
+        .in("status", ["hadir_qr", "hadir_manual", "alpa"]);
 
       if (logs) {
         const trendMap = {};
@@ -243,7 +248,7 @@ export default function Dashboard() {
     };
   }, [fetchDashboardData]);
 
-  const StatCard = ({ title, value, icon, colorClass, bgClass }) => (
+  const StatCard = ({ title, value, icon, colorClass, bgClass, subtitle }) => (
     <div className="bg-white p-6 rounded-3xl shadow-xl shadow-blue-900/5 border border-slate-100 flex items-center gap-5 hover:-translate-y-1 transition-transform duration-300">
       <div
         className={`w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0 ${bgClass} ${colorClass}`}
@@ -255,6 +260,11 @@ export default function Dashboard() {
           {title}
         </p>
         <h3 className="text-3xl font-black text-slate-800">{value}</h3>
+        {subtitle && (
+          <p className="text-[10px] text-slate-400 font-semibold mt-0.5">
+            {subtitle}
+          </p>
+        )}
       </div>
     </div>
   );
@@ -327,6 +337,7 @@ export default function Dashboard() {
         <StatCard
           title="Total Pindai"
           value={stats.totalLogs}
+          subtitle={`${stats.countedLogs} Terhitung Sesi`}
           icon={<Activity size={22} />}
           colorClass="text-amber-600"
           bgClass="bg-amber-50"
@@ -410,14 +421,14 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Bagian Grafik Analitik (Fixed Responsive Dimensions) */}
+      {/* Bagian Grafik Analitik */}
       <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-6 pb-10">
         <div className="bg-white p-6 md:p-8 rounded-3xl shadow-xl shadow-blue-900/5 border border-slate-100 flex flex-col h-[400px]">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-lg font-bold text-slate-800">Tren Kehadiran</h2>
               <p className="text-xs font-medium text-slate-400 mt-0.5">
-                Jumlah presensi pada 7 sesi terakhir
+                Jumlah presensi terhitung sesi pada 7 sesi terakhir
               </p>
             </div>
             <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400">

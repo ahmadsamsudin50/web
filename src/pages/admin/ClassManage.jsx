@@ -266,10 +266,11 @@ export default function ClassManage() {
           .order("id", { ascending: false });
       }
 
+      // Menghitung kehadiran murni dan alpa (izin dan sakit tetap dikecualikan)
       const logsRes = await supabase
         .from("attendance_logs")
         .select("enrollment_id")
-        .in("status", ["hadir_qr", "hadir_manual"]);
+        .in("status", ["hadir_qr", "hadir_manual", "alpa"]);
 
       if (enrollRes.error) throw enrollRes.error;
 

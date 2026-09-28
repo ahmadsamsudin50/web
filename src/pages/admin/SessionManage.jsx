@@ -165,6 +165,70 @@ export default function SessionManage() {
       onConfirm: null,
     });
 
+  // Fungsi menandai murid & pelatih yang belum absen menjadi alpa saat sesi ditutup
+  const markAlpaForSession = async (session) => {
+    if (!session || !session.id) return;
+    try {
+      // 1. Ambil log kehadiran yang sudah tercatat
+      const { data: existingLogs } = await supabase
+        .from("attendance_logs")
+        .select("student_id, coach_id")
+        .eq("session_id", session.id);
+
+      const attendedStudentIds = new Set((existingLogs || []).map((l) => l.student_id).filter(Boolean));
+      const attendedCoachIds = new Set((existingLogs || []).map((l) => l.coach_id).filter(Boolean));
+
+      const alpaLogs = [];
+      const nowIso = new Date().toISOString();
+
+      // 2. Tandai murid aktif yang belum absen
+      if (session.class_ids && session.class_ids.length > 0) {
+        const { data: enrollments } = await supabase
+          .from("student_enrollments")
+          .select("id, student_id")
+          .in("class_id", session.class_ids)
+          .eq("status", "active");
+
+        if (enrollments && enrollments.length > 0) {
+          enrollments.forEach((enr) => {
+            if (enr.student_id && !attendedStudentIds.has(enr.student_id)) {
+              alpaLogs.push({
+                session_id: session.id,
+                student_id: enr.student_id,
+                enrollment_id: enr.id,
+                status: "alpa",
+                scanned_at: nowIso,
+              });
+              attendedStudentIds.add(enr.student_id);
+            }
+          });
+        }
+      }
+
+      // 3. Tandai pelatih bertugas yang belum absen
+      if (session.coach_ids && session.coach_ids.length > 0) {
+        session.coach_ids.forEach((coachId) => {
+          if (coachId && !attendedCoachIds.has(coachId)) {
+            alpaLogs.push({
+              session_id: session.id,
+              coach_id: coachId,
+              status: "alpa",
+              scanned_at: nowIso,
+            });
+            attendedCoachIds.add(coachId);
+          }
+        });
+      }
+
+      // 4. Batch insert status alpa
+      if (alpaLogs.length > 0) {
+        await supabase.from("attendance_logs").insert(alpaLogs);
+      }
+    } catch (err) {
+      console.error("Gagal menetapkan status alpa otomatis:", err);
+    }
+  };
+
   const loadDependencies = async () => {
     const [clsRes, cchRes] = await Promise.all([
       supabase.from("classes").select("id, name, category").order("name"),
@@ -207,14 +271,14 @@ export default function SessionManage() {
 
       const now = new Date();
       const twelveHoursMs = 12 * 60 * 60 * 1000;
-      const expiredIds = [];
+      const expiredSessions = [];
 
       const updatedData = (sessionRes.data || []).map((s) => {
         let activeState = s.is_active;
         if (activeState) {
           const sessionTime = new Date(s.session_date);
           if (now.getTime() - sessionTime.getTime() > twelveHoursMs) {
-            expiredIds.push(s.id);
+            expiredSessions.push(s);
             activeState = false;
           }
         }
@@ -231,12 +295,17 @@ export default function SessionManage() {
         };
       });
 
-      if (expiredIds.length > 0) {
-        supabase
+      if (expiredSessions.length > 0) {
+        const expiredIds = expiredSessions.map((s) => s.id);
+        await supabase
           .from("sessions")
           .update({ is_active: false })
-          .in("id", expiredIds)
-          .then();
+          .in("id", expiredIds);
+
+        // Tandai alpa untuk sesi kedaluwarsa yang baru ditutup otomatis
+        for (const expSession of expiredSessions) {
+          await markAlpaForSession(expSession);
+        }
       }
 
       setSessions(updatedData);
@@ -503,7 +572,7 @@ export default function SessionManage() {
 
   const toggleStatus = async (id, currentStatus) => {
     const loadingToast = toast.loading(
-      currentStatus ? "Menutup gerbang sesi..." : "Membuka gerbang sesi...",
+      currentStatus ? "Menutup gerbang sesi & menetapkan alpa..." : "Membuka gerbang sesi...",
     );
     const { error } = await supabase
       .from("sessions")
@@ -511,7 +580,15 @@ export default function SessionManage() {
       .eq("id", id);
 
     if (!error) {
-      toast.success(currentStatus ? "Sesi ditutup" : "Sesi diaktifkan", {
+      // Jika gerbang sesi ditutup (dari aktif -> nonaktif), catat alpa untuk yang belum absen
+      if (currentStatus) {
+        const targetSession = sessions.find((s) => s.id === id);
+        if (targetSession) {
+          await markAlpaForSession(targetSession);
+        }
+      }
+
+      toast.success(currentStatus ? "Sesi ditutup & alpa dicatat" : "Sesi diaktifkan", {
         id: loadingToast,
       });
       fetchSessions();

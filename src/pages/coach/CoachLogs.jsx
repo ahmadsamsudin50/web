@@ -121,14 +121,17 @@ export default function CoachLogs() {
     return status ? status.replace("_", " ") : "-";
   };
 
-  const totalPresent = logs.filter((l) => l.status.includes("hadir")).length;
+  const totalPresentOnly = logs.filter((l) => l.status.includes("hadir")).length;
   const totalExcused = logs.filter((l) => l.status === "izin").length;
   const totalSick = logs.filter((l) => l.status === "sakit").length;
   const totalAbsent = logs.filter((l) => l.status === "alpa").length;
 
-  // Indikator Jam Terbang & Rasio Presensi (Standar per sesi renang klub = 1.5 jam)
-  const totalHoursTrained = Number((totalPresent * 1.5).toFixed(1));
-  const attendanceRate = logs.length > 0 ? Math.round((totalPresent / logs.length) * 100) : 0;
+  // Sesi yang terhitung kuota tugas (hadir + alpa, izin & sakit dikecualikan)
+  const totalCountedSessions = totalPresentOnly + totalAbsent;
+
+  // Jam terbang melatih murni hanya menghitung kehadiran fisik (standar per sesi = 1.5 jam)
+  const totalHoursTrained = Number((totalPresentOnly * 1.5).toFixed(1));
+  const attendanceRate = logs.length > 0 ? Math.round((totalPresentOnly / logs.length) * 100) : 0;
 
   const hasActiveFilters = searchQuery || filterStatus !== "all" || dateFrom || dateTo;
   const clearFilters = () => {
@@ -171,7 +174,7 @@ export default function CoachLogs() {
               <span className="text-3xl font-black">{totalHoursTrained}</span>
               <span className="text-xs font-semibold text-blue-200">Jam Terlaksana</span>
             </div>
-            <p className="text-[11px] text-blue-300 mt-1">Estimasi akumulasi sesi hadir aktif</p>
+            <p className="text-[11px] text-blue-300 mt-1">Akumulasi {totalPresentOnly} sesi hadir aktif</p>
           </div>
           <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center backdrop-blur-md shrink-0">
             <Timer size={24} className="text-cyan-300" />
@@ -181,14 +184,14 @@ export default function CoachLogs() {
         <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex items-center justify-between">
           <div>
             <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 block mb-1">
-              Sesi Tugas Selesai
+              Sesi Tugas Terhitung
             </span>
             <div className="flex items-baseline gap-2">
-              <span className="text-3xl font-black text-slate-800">{totalPresent}</span>
+              <span className="text-3xl font-black text-slate-800">{totalCountedSessions}</span>
               <span className="text-xs font-semibold text-slate-400">/ {logs.length} Sesi Terjadwal</span>
             </div>
             <p className="text-[11px] text-emerald-600 font-semibold mt-1 flex items-center gap-1">
-              <CheckCircle2 size={13} /> {attendanceRate}% Rasio Kehadiran
+              <CheckCircle2 size={13} /> {attendanceRate}% Rasio Hadir Murni
             </p>
           </div>
           <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
@@ -218,10 +221,10 @@ export default function CoachLogs() {
       {/* Baris 2: Rincian Kategori Status */}
       <div className="max-w-7xl mx-auto grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
         {[
-          { label: "Hadir", value: totalPresent, color: "text-emerald-600", bg: "bg-emerald-50/60" },
+          { label: "Hadir", value: totalPresentOnly, color: "text-emerald-600", bg: "bg-emerald-50/60" },
           { label: "Izin", value: totalExcused, color: "text-blue-600", bg: "bg-blue-50/60" },
           { label: "Sakit", value: totalSick, color: "text-amber-600", bg: "bg-amber-50/60" },
-          { label: "Alpa", value: totalAbsent, color: "text-rose-600", bg: "bg-rose-50/60" },
+          { label: "Alpa (Terhitung)", value: totalAbsent, color: "text-rose-600", bg: "bg-rose-50/60" },
         ].map((card) => (
           <div key={card.label} className={`rounded-2xl p-4 border border-slate-200 shadow-sm ${card.bg}`}>
             <div className={`text-2xl font-black ${card.color}`}>{card.value}</div>

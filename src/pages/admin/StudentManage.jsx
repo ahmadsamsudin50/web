@@ -217,7 +217,7 @@ export default function StudentManage() {
         supabase
           .from("attendance_logs")
           .select("enrollment_id")
-          .in("status", ["hadir_qr", "hadir_manual"]),
+          .in("status", ["hadir_qr", "hadir_manual", "alpa"]),
       ]);
 
       if (clsRes.error) throw clsRes.error;
@@ -225,7 +225,7 @@ export default function StudentManage() {
 
       setClasses(Array.isArray(clsRes.data) ? clsRes.data : []);
 
-      // Hitung total sesi kehadiran valid per enrollment_id
+      // Hitung total sesi kehadiran valid per enrollment_id (termasuk alpa)
       const attendanceCountMap = {};
       if (Array.isArray(logsRes.data)) {
         logsRes.data.forEach((log) => {
@@ -767,7 +767,8 @@ export default function StudentManage() {
 
       {/* Tabel Data Atlet */}
       <div className="max-w-7xl mx-auto bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-        <div className="overflow-x-auto">
+        {/* Tampilan Desktop & Tablet: Disembunyikan pada layar mobile dengan hidden md:block */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[980px]">
             <thead>
               <tr className="bg-slate-50 text-slate-400 text-[10px] uppercase tracking-wider font-bold border-b border-slate-100">
@@ -926,7 +927,7 @@ export default function StudentManage() {
           </table>
         </div>
 
-        {/* Tampilan Mobile */}
+        {/* Tampilan Mobile: Hanya muncul di layar kecil (md:hidden) */}
         <div className="md:hidden divide-y divide-slate-100 p-3 space-y-3">
           {processedStudents.map((s, index) => (
             <div key={s.id} className="pt-3 first:pt-0 space-y-2.5">
@@ -997,6 +998,12 @@ export default function StudentManage() {
               </div>
             </div>
           ))}
+
+          {processedStudents.length === 0 && !loading && (
+            <div className="py-8 text-center text-slate-400 text-xs">
+              Tidak ada data atlet pada kategori ini.
+            </div>
+          )}
         </div>
       </div>
 
