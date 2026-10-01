@@ -537,32 +537,42 @@ export default function StudentManage() {
         closeConfirm();
         const loadingToast = toast.loading("Menghapus seluruh rekaman...");
         try {
-          await supabase
-            .from("attendance_logs")
-            .delete()
-            .eq("student_id", s.id);
+          // 1. Hapus riwayat presensi
+          if (s.id) {
+            await supabase
+              .from("attendance_logs")
+              .delete()
+              .eq("student_id", s.id);
 
-          await supabase
-            .from("student_enrollments")
-            .delete()
-            .eq("student_id", s.id);
+            // 2. Hapus pendaftaran kelas
+            await supabase
+              .from("student_enrollments")
+              .delete()
+              .eq("student_id", s.id);
 
-          await supabase
-            .from("payments")
-            .delete()
-            .eq("student_id", s.id);
+            // 3. Hapus transaksi pembayaran
+            await supabase
+              .from("payments")
+              .delete()
+              .eq("student_id", s.id);
 
-          const { error: studentErr } = await supabase
-            .from("students")
-            .delete()
-            .eq("id", s.id);
-          if (studentErr) throw studentErr;
+            // 4. Hapus data profil atlet di tabel students
+            const { error: studentErr } = await supabase
+              .from("students")
+              .delete()
+              .eq("id", s.id);
+            if (studentErr) throw studentErr;
+          }
 
-          const { error: userErr } = await supabase
-            .from("users")
-            .delete()
-            .eq("id", s.user_id);
-          if (userErr) throw userErr;
+          // 5. Hapus akun pengguna di tabel users
+          const targetUserId = s.user_id || s.users?.id;
+          if (targetUserId) {
+            const { error: userErr } = await supabase
+              .from("users")
+              .delete()
+              .eq("id", targetUserId);
+            if (userErr) throw userErr;
+          }
 
           toast.success("Data atlet berhasil dihapus!", { id: loadingToast });
           fetchData();

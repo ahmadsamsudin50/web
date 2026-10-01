@@ -20,6 +20,7 @@ import {
   RotateCcw,
   User,
   Wallet,
+  Calendar,
 } from "lucide-react";
 
 function CustomConfirmModal({
@@ -499,6 +500,24 @@ export default function Payments() {
 
   return (
     <div className="min-h-screen bg-[#f8fafc] p-4 md:p-8 font-sans">
+      {/* CSS kustom untuk mengecilkan dan mempercantik scrollbar di desktop */}
+      <style>{`
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 5px;
+          height: 5px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: rgba(148, 163, 184, 0.4);
+          border-radius: 9999px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: rgba(100, 116, 139, 0.6);
+        }
+      `}</style>
+
       <Toaster position="top-right" />
 
       <CustomConfirmModal
@@ -521,7 +540,7 @@ export default function Payments() {
         </p>
       </div>
 
-      <div className="max-w-7xl mx-auto mb-6 flex gap-2 p-1.5 bg-white border border-slate-200 rounded-2xl shadow-sm overflow-x-auto">
+      <div className="max-w-7xl mx-auto mb-6 flex gap-2 p-1.5 bg-white border border-slate-200 rounded-2xl shadow-sm overflow-x-auto custom-scrollbar">
         <button
           onClick={() => {
             setFilterStatus("pending");
@@ -854,7 +873,7 @@ export default function Payments() {
       {/* Modal Tinjau Pembayaran */}
       {isModalOpen && selectedPayment && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 flex flex-col gap-5 animate-in zoom-in-95 duration-200">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 flex flex-col gap-5 animate-in zoom-in-95 duration-200 custom-scrollbar">
             <div className="flex justify-between items-center border-b border-slate-100 pb-3">
               <div>
                 <h3 className="text-base font-bold text-slate-800">Tinjau Bukti Pembayaran</h3>
@@ -944,7 +963,26 @@ export default function Payments() {
             </div>
 
             <div className="p-4 bg-slate-50 rounded-2xl space-y-2.5 text-xs">
+              {/* Tanggal & Waktu Pembayaran di Modal */}
               <div className="flex justify-between">
+                <span className="text-slate-500">Waktu Pembayaran:</span>
+                <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                  <Calendar size={13} className="text-blue-600" />
+                  {new Date(selectedPayment.created_at).toLocaleDateString("id-ID", {
+                    day: "numeric",
+                    month: "long",
+                    year: "numeric",
+                  })}{" "}
+                  •{" "}
+                  {new Date(selectedPayment.created_at).toLocaleTimeString("id-ID", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}{" "}
+                  WIB
+                </span>
+              </div>
+
+              <div className="flex justify-between pt-1 border-t border-slate-200/60">
                 <span className="text-slate-500">Nama Atlet:</span>
                 <span className="font-bold text-slate-800">{selectedPayment.students?.users?.full_name}</span>
               </div>
