@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useRef } from "react";
 import { supabase } from "../../utils/supabaseClient";
 import { toast, Toaster } from "react-hot-toast";
 import {
@@ -21,6 +21,9 @@ import {
   User,
   Wallet,
   Calendar,
+  Upload,
+  CheckCheck,
+  Download,
 } from "lucide-react";
 
 function CustomConfirmModal({
@@ -82,6 +85,10 @@ export default function Payments() {
   const [isRejecting, setIsRejecting] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
 
+  // State Match Mutasi Ketat
+  const [matchedIds, setMatchedIds] = useState(new Set());
+  const fileInputRef = useRef(null);
+
   // State Viewer Gambar (Zoom & Rotasi)
   const [imageScale, setImageScale] = useState(1);
   const [imageRotation, setImageRotation] = useState(0);
@@ -111,7 +118,6 @@ export default function Payments() {
     setConfirmState((prev) => ({ ...prev, isOpen: false, onConfirm: null }));
   };
 
-  // Helper untuk membersihkan berkas bukti transfer di Supabase Storage (P4)
   const extractStoragePath = (publicUrl) => {
     if (!publicUrl) return null;
     try {
@@ -141,7 +147,6 @@ export default function Payments() {
       }
 
       const { count } = await query;
-      // Hapus berkas fisik jika tidak dipakai baris transaksi lain
       if (!count || count === 0) {
         await supabase.storage.from("images").remove([filePath]);
       }
@@ -174,7 +179,134 @@ export default function Payments() {
     fetchPayments();
   }, []);
 
-  // Hitung jumlah item bundle per receipt & student
+  // Fitur Export Transaksi Pending ke CSV
+  const handleExportPendingCSV = () => {
+    const pendingList = payments.filter((p) => p.status === "pending");
+
+    if (pendingList.length === 0) {
+      toast.error("Tidak ada transaksi berstatus pending untuk diexport.");
+      return;
+    }
+
+    const headers = [
+      "ID Transaksi",
+      "Nominal (IDR)",
+      "Status",
+      "Nama Pengirim",
+      "Bank Pengirim",
+      "Nama Atlet",
+      "NIS",
+      "Kelas Tujuan",
+      "Waktu Pembayaran",
+      "URL Bukti Transfer",
+    ];
+
+    const rows = pendingList.map((p) => {
+      const dateObj = new Date(p.created_at);
+      const formattedDate = `${dateObj.toLocaleDateString("id-ID")} ${dateObj.toLocaleTimeString("id-ID")}`;
+
+      return [
+        `"${p.id || ""}"`,
+        p.amount || 0,
+        `"${p.status || "pending"}"`,
+        `"${p.sender_name || ""}"`,
+        `"${p.sender_bank || ""}"`,
+        `"${p.students?.users?.full_name || ""}"`,
+        `"${p.students?.nis || ""}"`,
+        `"${p.classes?.name || ""}"`,
+        `"${formattedDate}"`,
+        `"${p.receipt_url || ""}"`,
+      ];
+    });
+
+    const csvContent =
+      "data:text/csv;charset=utf-8,\uFEFF" +
+      [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
+
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `pembayaran_pending_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    toast.success(`Berhasil mengunduh ${pendingList.length} data transaksi pending!`);
+  };
+
+  // Handler Auto-Match Mutasi Ketat (Tanggal + Nama Pengirim/Atlet + Nominal)
+  const handleFileUpload = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const content = e.target.result;
+      if (!content) return;
+
+      const lines = content.split(/\r\n|\n/);
+      const matchedSet = new Set();
+      let matchCount = 0;
+
+      payments
+        .filter((p) => p.status === "pending")
+        .forEach((payment) => {
+          const senderName = (payment.sender_name || "").toLowerCase().trim();
+          const studentName = (payment.students?.users?.full_name || "").toLowerCase().trim();
+          const amountStr = String(payment.amount);
+
+          const payDate = new Date(payment.created_at);
+          const dayStr = String(payDate.getDate()).padStart(2, "0");
+          const monthStr = String(payDate.getMonth() + 1).padStart(2, "0");
+          const formattedDateStr = `${dayStr}/${monthStr}`;
+
+          const prevDate = new Date(payDate);
+          prevDate.setDate(prevDate.getDate() - 1);
+          const prevDayStr = String(prevDate.getDate()).padStart(2, "0");
+          const prevMonthStr = String(prevDate.getMonth() + 1).padStart(2, "0");
+          const formattedPrevDateStr = `${prevDayStr}/${prevMonthStr}`;
+
+          const isMatched = lines.some((line) => {
+            const lineLower = line.toLowerCase();
+
+            const containsAmount = lineLower.includes(amountStr);
+            const containsDate =
+              lineLower.includes(formattedDateStr) ||
+              lineLower.includes(formattedPrevDateStr) ||
+              lineLower.includes("pend");
+
+            let containsName = false;
+            if (senderName && senderName.length > 2) {
+              containsName = lineLower.includes(senderName);
+            }
+            if (!containsName && studentName && studentName.length > 2) {
+              const firstName = studentName.split(" ")[0];
+              if (firstName.length > 2) {
+                containsName = lineLower.includes(firstName);
+              }
+            }
+
+            return containsAmount && containsDate && containsName;
+          });
+
+          if (isMatched) {
+            matchedSet.add(payment.id);
+            matchCount++;
+          }
+        });
+
+      setMatchedIds(matchedSet);
+      if (matchCount > 0) {
+        toast.success(`Berhasil mencocokkan ${matchCount} transaksi (Ketat: Tanggal, Nama, & Nominal)!`);
+      } else {
+        toast.error("Tidak ada transaksi pending yang cocok secara ketat dengan mutasi ini.");
+      }
+    };
+
+    reader.readAsText(file);
+    event.target.value = "";
+  };
+
   const bundleReceiptMap = useMemo(() => {
     const map = new Map();
     payments.forEach((p) => {
@@ -278,7 +410,6 @@ export default function Payments() {
   const handleZoomOut = () => setImageScale((prev) => Math.max(prev - 0.25, 0.75));
   const handleRotateRight = () => setImageRotation((prev) => (prev + 90) % 360);
 
-  // Helper eksekusi persetujuan atomik (P2 & P3)
   const processApproval = async (paymentItem, adminId) => {
     const { error: rpcError } = await supabase.rpc("approve_student_payment", {
       p_payment_id: paymentItem.id,
@@ -334,7 +465,30 @@ export default function Payments() {
     if (enrollError) throw enrollError;
   };
 
-  // Setujui Satu Baris Kelas
+  const handleApproveMatched = async () => {
+    const targetIds = Array.from(matchedIds);
+    if (targetIds.length === 0) return;
+
+    setActionLoading(true);
+    const loadingToast = toast.loading(`Menyetujui ${targetIds.length} transaksi yang cocok dengan mutasi...`);
+    try {
+      const admin = JSON.parse(localStorage.getItem("user_session") || "{}");
+      const matchedPayments = payments.filter((p) => targetIds.includes(p.id) && p.status === "pending");
+
+      for (const p of matchedPayments) {
+        await processApproval(p, admin?.id);
+      }
+
+      toast.success(`${matchedPayments.length} transaksi berhasil disetujui otomatis!`, { id: loadingToast });
+      setMatchedIds(new Set());
+      fetchPayments();
+    } catch (error) {
+      toast.error(error.message, { id: loadingToast });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const handleApproveSingle = async (targetPayment) => {
     setActionLoading(true);
     const loadingToast = toast.loading("Memeriksa kapasitas kelas dan menyetujui...");
@@ -352,7 +506,6 @@ export default function Payments() {
     }
   };
 
-  // Setujui Semua Kelas Sekaligus Dalam 1 Bukti Transfer
   const handleApproveAllRelated = async () => {
     setActionLoading(true);
     const pendingRelated = relatedPayments.filter((p) => p.status === "pending");
@@ -374,7 +527,6 @@ export default function Payments() {
     }
   };
 
-  // Tolak Pembayaran & Bersihkan Berkas Terkait (P4)
   const handleReject = async () => {
     if (!rejectReason.trim()) {
       toast.error("Harap isi alasan penolakan.");
@@ -409,7 +561,6 @@ export default function Payments() {
     }
   };
 
-  // Hapus Satu Transaksi & Bersihkan Berkas Struk (P4)
   const handleDeleteSingle = (payment) => {
     triggerConfirm({
       title: "Hapus Riwayat Pembayaran?",
@@ -435,7 +586,6 @@ export default function Payments() {
     });
   };
 
-  // Hapus Massal Transaksi & Bersihkan Berkas (P4)
   const handleDeleteSelected = () => {
     if (selectedIds.length === 0) return;
 
@@ -500,7 +650,6 @@ export default function Payments() {
 
   return (
     <div className="min-h-screen bg-[#f8fafc] p-4 md:p-8 font-sans">
-      {/* CSS kustom untuk mengecilkan dan mempercantik scrollbar di desktop */}
       <style>{`
         .custom-scrollbar::-webkit-scrollbar {
           width: 5px;
@@ -520,6 +669,14 @@ export default function Payments() {
 
       <Toaster position="top-right" />
 
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileUpload}
+        accept=".csv,.txt,.xls,.xlsx"
+        className="hidden"
+      />
+
       <CustomConfirmModal
         isOpen={confirmState.isOpen}
         onClose={closeConfirm}
@@ -530,14 +687,46 @@ export default function Payments() {
         isDestructive={confirmState.isDestructive}
       />
 
-      <div className="max-w-7xl mx-auto mb-6">
-        <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight flex items-center gap-3">
-          <CreditCard className="text-blue-600" size={28} />
-          Verifikasi Pembayaran
-        </h1>
-        <p className="text-slate-500 mt-1 text-sm">
-          Periksa, validasi, dan kelola konfirmasi transfer pendaftaran kelas atlet.
-        </p>
+      <div className="max-w-7xl mx-auto mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight flex items-center gap-3">
+            <CreditCard className="text-blue-600" size={28} />
+            Verifikasi Pembayaran
+          </h1>
+          <p className="text-slate-500 mt-1 text-sm">
+            Periksa, validasi, dan kelola konfirmasi transfer pendaftaran kelas atlet.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={handleExportPendingCSV}
+            className="flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs sm:text-sm rounded-xl shadow-md transition-all active:scale-95 shrink-0"
+            title="Export data transaksi pending ke format CSV"
+          >
+            <Download size={18} /> Export Pending (CSV)
+          </button>
+
+          {matchedIds.size > 0 && (
+            <button
+              type="button"
+              onClick={handleApproveMatched}
+              disabled={actionLoading}
+              className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs sm:text-sm rounded-xl shadow-md transition-all active:scale-95 shrink-0"
+            >
+              <CheckCheck size={18} /> Setujui {matchedIds.size} Data Match
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs sm:text-sm rounded-xl shadow-md transition-all active:scale-95 shrink-0"
+          >
+            <Upload size={18} /> Import & Match Mutasi
+          </button>
+        </div>
       </div>
 
       <div className="max-w-7xl mx-auto mb-6 flex gap-2 p-1.5 bg-white border border-slate-200 rounded-2xl shadow-sm overflow-x-auto custom-scrollbar">
@@ -688,6 +877,7 @@ export default function Payments() {
             <tbody className="divide-y divide-slate-100 text-xs">
               {filteredPayments.map((p) => {
                 const isSelected = selectedIds.includes(p.id);
+                const isMatched = matchedIds.has(p.id);
                 const dateObj = new Date(p.created_at);
                 const dateStr = dateObj.toLocaleDateString("id-ID", {
                   day: "numeric",
@@ -704,7 +894,11 @@ export default function Payments() {
                   <tr
                     key={p.id}
                     className={`transition-colors ${
-                      isSelected ? "bg-blue-50/60" : "hover:bg-slate-50/50"
+                      isMatched
+                        ? "bg-emerald-50/80 hover:bg-emerald-100/60"
+                        : isSelected
+                        ? "bg-blue-50/60"
+                        : "hover:bg-slate-50/50"
                     }`}
                   >
                     <td className="px-4 py-4 text-center">
@@ -721,7 +915,14 @@ export default function Payments() {
                       </button>
                     </td>
                     <td className="px-6 py-4">
-                      <div className="font-bold text-slate-800 text-sm">{formatRupiah(p.amount)}</div>
+                      <div className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
+                        {formatRupiah(p.amount)}
+                        {isMatched && (
+                          <span className="px-2 py-0.5 bg-emerald-600 text-white text-[9px] font-black rounded-md flex items-center gap-0.5">
+                            <CheckCheck size={11} /> MATCH MUTASI
+                          </span>
+                        )}
+                      </div>
                       <div className="text-xs text-slate-400 mt-0.5">
                         {dateStr} • {timeStr} WIB
                       </div>
@@ -732,7 +933,6 @@ export default function Payments() {
                       )}
                     </td>
 
-                    {/* Kolom Informasi Rekening & Bank Asal */}
                     <td className="px-6 py-4">
                       {p.sender_name || p.sender_bank ? (
                         <div className="space-y-1">
@@ -788,6 +988,7 @@ export default function Payments() {
         <div className="md:hidden space-y-3">
           {filteredPayments.map((p) => {
             const isSelected = selectedIds.includes(p.id);
+            const isMatched = matchedIds.has(p.id);
             const dateObj = new Date(p.created_at);
             const dateStr = dateObj.toLocaleDateString("id-ID", { day: "numeric", month: "short" });
 
@@ -795,7 +996,11 @@ export default function Payments() {
               <div
                 key={p.id}
                 className={`bg-white border rounded-2xl p-4 shadow-sm space-y-3 transition-all ${
-                  isSelected ? "border-blue-500 ring-1 ring-blue-500 bg-blue-50/30" : "border-slate-200"
+                  isMatched
+                    ? "border-emerald-500 bg-emerald-50/40"
+                    : isSelected
+                    ? "border-blue-500 ring-1 ring-blue-500 bg-blue-50/30"
+                    : "border-slate-200"
                 }`}
               >
                 <div className="flex justify-between items-start">
@@ -812,14 +1017,20 @@ export default function Payments() {
                       )}
                     </button>
                     <div>
-                      <h3 className="font-bold text-slate-800 text-sm">{p.students?.users?.full_name}</h3>
+                      <h3 className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
+                        {p.students?.users?.full_name}
+                        {isMatched && (
+                          <span className="px-1.5 py-0.5 bg-emerald-600 text-white text-[8px] font-bold rounded">
+                            MATCH
+                          </span>
+                        )}
+                      </h3>
                       <p className="text-xs text-slate-400">NIS: {p.students?.nis}</p>
                     </div>
                   </div>
                   {getStatusBadge(p.status)}
                 </div>
 
-                {/* Detail Pengirim pada Mobile */}
                 {(p.sender_name || p.sender_bank) && (
                   <div className="p-2.5 bg-slate-50 border border-slate-100 rounded-xl text-xs space-y-1">
                     <div className="flex justify-between items-center text-[11px]">
@@ -891,7 +1102,6 @@ export default function Payments() {
               </button>
             </div>
 
-            {/* Viewer Bukti Transfer dengan Kontrol Zoom & Rotasi */}
             <div className="flex flex-col gap-2">
               <div className="flex items-center justify-between px-1">
                 <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
@@ -963,7 +1173,6 @@ export default function Payments() {
             </div>
 
             <div className="p-4 bg-slate-50 rounded-2xl space-y-2.5 text-xs">
-              {/* Tanggal & Waktu Pembayaran di Modal */}
               <div className="flex justify-between">
                 <span className="text-slate-500">Waktu Pembayaran:</span>
                 <span className="font-bold text-slate-800 flex items-center gap-1.5">
@@ -987,7 +1196,6 @@ export default function Payments() {
                 <span className="font-bold text-slate-800">{selectedPayment.students?.users?.full_name}</span>
               </div>
 
-              {/* Rincian Nama Pengirim dan Bank Asal Pada Modal */}
               <div className="flex justify-between pt-1 border-t border-slate-200/60">
                 <span className="text-slate-500">Pemilik Rekening (A.N):</span>
                 <span className="font-bold text-blue-700">{selectedPayment.sender_name || "-"}</span>
