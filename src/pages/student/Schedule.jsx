@@ -42,10 +42,10 @@ export default function Schedule() {
         if (!savedUser) throw new Error("Sesi berakhir. Silakan masuk kembali.");
         const user = JSON.parse(savedUser);
 
-        // 1. Dapatkan student_id dan daftar kelas aktif saja
+        // 1. Dapatkan student_id, daftar kelas aktif, beserta tanggal dibuatnya pendaftaran (created_at)
         const { data: studentData, error: studentError } = await supabase
           .from("students")
-          .select("id, student_enrollments(class_id, status, classes(name))")
+          .select("id, student_enrollments(class_id, status, created_at, classes(name))")
           .eq("user_id", user.id)
           .single();
 
@@ -55,13 +55,17 @@ export default function Schedule() {
         const activeEnrollments = studentData.student_enrollments?.filter(
           (e) => e.status === "active"
         ) || [];
-        const activeClassIds = activeEnrollments.map((e) => e.class_id);
 
+        // Petakan tanggal pendaftaran (Timestamp) dan nama kelas per class_id
+        const classEnrollmentDates = {};
         const cMapNames = {};
         activeEnrollments.forEach((e) => {
+          classEnrollmentDates[e.class_id] = new Date(e.created_at).getTime();
           cMapNames[e.class_id] = e.classes?.name;
         });
         setClassesMap(cMapNames);
+
+        const activeClassIds = Object.keys(classEnrollmentDates);
 
         let sessionData = [];
         if (activeClassIds.length > 0) {
@@ -72,10 +76,17 @@ export default function Schedule() {
 
           if (sessionError) throw sessionError;
 
-          // Saring sesi yang mencakup kelas aktif atlet
+          // Saring sesi yang mencakup kelas aktif atlet DAN tanggal sesinya >= tanggal pendaftaran kelas
           sessionData = (allSessions || []).filter((session) => {
             if (!session.class_ids) return false;
-            return session.class_ids.some((cId) => activeClassIds.includes(cId));
+
+            const sessionTime = new Date(session.session_date).getTime();
+
+            return session.class_ids.some((cId) => {
+              const enrollTime = classEnrollmentDates[cId];
+              // Hanya tampilkan jika murid sudah terdaftar sebelum/saat sesi dilaksanakan
+              return enrollTime && sessionTime >= enrollTime;
+            });
           });
 
           // Ambil log kehadiran atlet untuk sesi-sesi tersebut

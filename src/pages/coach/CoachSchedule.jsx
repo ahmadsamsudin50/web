@@ -131,11 +131,11 @@ export default function CoachSchedule() {
         return;
       }
 
-      // Ambil seluruh siswa aktif di kelas-kelas sesi ini beserta avatar_url
+      // Ambil seluruh siswa aktif di kelas-kelas sesi ini beserta avatar_url dan created_at
       let enrollRes = await supabase
         .from("student_enrollments")
         .select(`
-          id, class_id, status,
+          id, class_id, status, created_at,
           classes ( id, name ),
           students (
             id, nis, parent_name, phone_number, avatar_url,
@@ -150,7 +150,7 @@ export default function CoachSchedule() {
         enrollRes = await supabase
           .from("student_enrollments")
           .select(`
-            id, class_id, status,
+            id, class_id, status, created_at,
             classes ( id, name ),
             students (
               id, nis, parent_name, phone_number,
@@ -162,6 +162,13 @@ export default function CoachSchedule() {
       }
 
       if (enrollRes.error) throw enrollRes.error;
+
+      // Filter murid: Hanya ambil murid yang terdaftar sebelum atau tepat saat sesi dilaksanakan
+      const sessionTime = new Date(session.session_date).getTime();
+      const validEnrollments = (enrollRes.data || []).filter((item) => {
+        const enrollTime = new Date(item.created_at).getTime();
+        return enrollTime <= sessionTime;
+      });
 
       // Ambil riwayat absensi pada sesi ini untuk mengetahui status murid
       const { data: logsData } = await supabase
@@ -176,7 +183,7 @@ export default function CoachSchedule() {
         }
       });
 
-      const mappedStudents = (enrollRes.data || []).map((item) => ({
+      const mappedStudents = validEnrollments.map((item) => ({
         ...item,
         attendanceStatus: statusMap[item.students?.id] || (session.is_active ? "belum_absen" : "alpa"),
       }));
