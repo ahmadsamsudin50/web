@@ -580,7 +580,6 @@ export default function SessionManage() {
       .eq("id", id);
 
     if (!error) {
-      // Jika gerbang sesi ditutup (dari aktif -> nonaktif), catat alpa untuk yang belum absen
       if (currentStatus) {
         const targetSession = sessions.find((s) => s.id === id);
         if (targetSession) {
@@ -983,98 +982,101 @@ export default function SessionManage() {
                       </div>
                     </div>
                     <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
-                      <table className="w-full text-left text-sm">
-                        <thead className="bg-slate-50 border-b border-slate-100">
-                          <tr>
-                            <th className="px-4 py-3 font-bold text-slate-500">Nama Atlet</th>
-                            <th className="px-4 py-3 font-bold text-slate-500">Kelas & Kategori</th>
-                            <th className="px-4 py-3 font-bold text-slate-500 text-center">Waktu</th>
-                            <th className="px-4 py-3 font-bold text-slate-500 text-right">Status</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {sessionDetails.students.map((std, idx) => {
-                            const studentAvatar = std.avatar_url;
-                            const studentName = std.users?.full_name || "Tanpa Nama";
+                      {/* Penambahan overflow-x-auto untuk mendukung scroll horizontal pada mobile */}
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-sm min-w-[550px]">
+                          <thead className="bg-slate-50 border-b border-slate-100">
+                            <tr>
+                              <th className="px-4 py-3 font-bold text-slate-500">Nama Atlet</th>
+                              <th className="px-4 py-3 font-bold text-slate-500">Kelas & Kategori</th>
+                              <th className="px-4 py-3 font-bold text-slate-500 text-center">Waktu</th>
+                              <th className="px-4 py-3 font-bold text-slate-500 text-right">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {sessionDetails.students.map((std, idx) => {
+                              const studentAvatar = std.avatar_url;
+                              const studentName = std.users?.full_name || "Tanpa Nama";
 
-                            return (
-                              <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                                <td className="px-4 py-3 font-medium text-slate-800">
-                                  <div className="flex items-center gap-3">
-                                    <div
-                                      onClick={() => {
-                                        if (studentAvatar) {
-                                          setImagePreviewModal({
-                                            isOpen: true,
-                                            url: studentAvatar,
-                                            name: studentName,
-                                          });
-                                        }
-                                      }}
-                                      className={`w-9 h-9 rounded-xl bg-blue-50 border border-slate-200 text-blue-600 flex items-center justify-center font-bold text-xs shrink-0 overflow-hidden ${
-                                        studentAvatar ? "cursor-pointer hover:opacity-85 transition-opacity" : ""
-                                      }`}
-                                      title={studentAvatar ? "Klik untuk memperbesar foto" : undefined}
-                                    >
-                                      {studentAvatar ? (
-                                        <img
-                                          src={studentAvatar}
-                                          alt={studentName}
-                                          className="w-full h-full object-cover"
-                                        />
-                                      ) : (
-                                        <User size={16} />
-                                      )}
-                                    </div>
-                                    <div>
-                                      <div className="font-bold text-slate-800 text-sm">
-                                        {studentName}
+                              return (
+                                <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                                  <td className="px-4 py-3 font-medium text-slate-800">
+                                    <div className="flex items-center gap-3">
+                                      <div
+                                        onClick={() => {
+                                          if (studentAvatar) {
+                                            setImagePreviewModal({
+                                              isOpen: true,
+                                              url: studentAvatar,
+                                              name: studentName,
+                                            });
+                                          }
+                                        }}
+                                        className={`w-9 h-9 rounded-xl bg-blue-50 border border-slate-200 text-blue-600 flex items-center justify-center font-bold text-xs shrink-0 overflow-hidden ${
+                                          studentAvatar ? "cursor-pointer hover:opacity-85 transition-opacity" : ""
+                                        }`}
+                                        title={studentAvatar ? "Klik untuk memperbesar foto" : undefined}
+                                      >
+                                        {studentAvatar ? (
+                                          <img
+                                            src={studentAvatar}
+                                            alt={studentName}
+                                            className="w-full h-full object-cover"
+                                          />
+                                        ) : (
+                                          <User size={16} />
+                                        )}
                                       </div>
-                                      <div className="text-xs text-slate-400 font-mono mt-0.5">
-                                        {std.nis}
+                                      <div>
+                                        <div className="font-bold text-slate-800 text-sm whitespace-nowrap">
+                                          {studentName}
+                                        </div>
+                                        <div className="text-xs text-slate-400 font-mono mt-0.5">
+                                          {std.nis}
+                                        </div>
                                       </div>
                                     </div>
-                                  </div>
-                                </td>
-                                <td className="px-4 py-3 text-slate-600 font-medium">
-                                  <div className="flex items-center gap-1.5">
-                                    <span>{std.classes?.name}</span>
+                                  </td>
+                                  <td className="px-4 py-3 text-slate-600 font-medium">
+                                    <div className="flex items-center gap-1.5 whitespace-nowrap">
+                                      <span>{std.classes?.name}</span>
+                                      <span
+                                        className={`text-[9px] font-black uppercase px-1.5 py-0.2 rounded border ${getCategoryBadgeStyle(
+                                          std.classes?.category,
+                                        )}`}
+                                      >
+                                        {std.classes?.category || "Umum"}
+                                      </span>
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-slate-500 font-medium font-mono text-xs whitespace-nowrap">
+                                    {formatTimeOnly(std.scanned_at)}
+                                  </td>
+                                  <td className="px-4 py-3 text-right whitespace-nowrap">
                                     <span
-                                      className={`text-[9px] font-black uppercase px-1.5 py-0.2 rounded border ${getCategoryBadgeStyle(
-                                        std.classes?.category,
+                                      className={`inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border ${getStatusBadgeStyle(
+                                        std.status,
                                       )}`}
                                     >
-                                      {std.classes?.category || "Umum"}
+                                      {std.status.replace("_", " ")}
                                     </span>
-                                  </div>
-                                </td>
-                                <td className="px-4 py-3 text-center text-slate-500 font-medium font-mono text-xs">
-                                  {formatTimeOnly(std.scanned_at)}
-                                </td>
-                                <td className="px-4 py-3 text-right">
-                                  <span
-                                    className={`inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border ${getStatusBadgeStyle(
-                                      std.status,
-                                    )}`}
-                                  >
-                                    {std.status.replace("_", " ")}
-                                  </span>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                            {sessionDetails.students.length === 0 && (
+                              <tr>
+                                <td
+                                  colSpan="4"
+                                  className="px-4 py-8 text-center text-slate-400 font-medium"
+                                >
+                                  Tidak ada atlet aktif yang terdaftar di kelas sesi ini.
                                 </td>
                               </tr>
-                            );
-                          })}
-                          {sessionDetails.students.length === 0 && (
-                            <tr>
-                              <td
-                                colSpan="4"
-                                className="px-4 py-8 text-center text-slate-400 font-medium"
-                              >
-                                Tidak ada atlet aktif yang terdaftar di kelas sesi ini.
-                              </td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   </div>
 
@@ -1083,46 +1085,49 @@ export default function SessionManage() {
                       <UserCheck size={16} className="text-indigo-500" /> Presensi Pelatih
                     </h4>
                     <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
-                      <table className="w-full text-left text-sm">
-                        <thead className="bg-slate-50 border-b border-slate-100">
-                          <tr>
-                            <th className="px-4 py-3 font-bold text-slate-500">Nama Pelatih</th>
-                            <th className="px-4 py-3 font-bold text-slate-500 text-center">Waktu</th>
-                            <th className="px-4 py-3 font-bold text-slate-500 text-right">Status</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {sessionDetails.coaches.map((coach) => (
-                            <tr key={coach.id} className="hover:bg-slate-50 transition-colors">
-                              <td className="px-4 py-3 font-medium text-slate-800">
-                                {coach.users?.full_name}
-                              </td>
-                              <td className="px-4 py-3 text-center text-slate-500 font-medium font-mono text-xs">
-                                {formatTimeOnly(coach.scanned_at)}
-                              </td>
-                              <td className="px-4 py-3 text-right">
-                                <span
-                                  className={`inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border ${getStatusBadgeStyle(
-                                    coach.status,
-                                  )}`}
-                                >
-                                  {coach.status.replace("_", " ")}
-                                </span>
-                              </td>
-                            </tr>
-                          ))}
-                          {sessionDetails.coaches.length === 0 && (
+                      {/* Penambahan overflow-x-auto untuk mendukung scroll horizontal pada mobile */}
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-sm min-w-[500px]">
+                          <thead className="bg-slate-50 border-b border-slate-100">
                             <tr>
-                              <td
-                                colSpan="3"
-                                className="px-4 py-8 text-center text-slate-400 font-medium"
-                              >
-                                Tidak ada pelatih yang ditugaskan ke sesi ini.
-                              </td>
+                              <th className="px-4 py-3 font-bold text-slate-500">Nama Pelatih</th>
+                              <th className="px-4 py-3 font-bold text-slate-500 text-center">Waktu</th>
+                              <th className="px-4 py-3 font-bold text-slate-500 text-right">Status</th>
                             </tr>
-                          )}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {sessionDetails.coaches.map((coach) => (
+                              <tr key={coach.id} className="hover:bg-slate-50 transition-colors">
+                                <td className="px-4 py-3 font-medium text-slate-800 whitespace-nowrap">
+                                  {coach.users?.full_name}
+                                </td>
+                                <td className="px-4 py-3 text-center text-slate-500 font-medium font-mono text-xs whitespace-nowrap">
+                                  {formatTimeOnly(coach.scanned_at)}
+                                </td>
+                                <td className="px-4 py-3 text-right whitespace-nowrap">
+                                  <span
+                                    className={`inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border ${getStatusBadgeStyle(
+                                      coach.status,
+                                    )}`}
+                                  >
+                                    {coach.status.replace("_", " ")}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                            {sessionDetails.coaches.length === 0 && (
+                              <tr>
+                                <td
+                                  colSpan="3"
+                                  className="px-4 py-8 text-center text-slate-400 font-medium"
+                                >
+                                  Tidak ada pelatih yang ditugaskan ke sesi ini.
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   </div>
                 </div>
