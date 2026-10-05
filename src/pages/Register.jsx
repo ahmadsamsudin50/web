@@ -196,11 +196,19 @@ export default function Register() {
         if (existingUser.status === "rejected") {
           const { data: oldStudent } = await supabase
             .from("students")
-            .select("id")
+            .select("id, avatar_url")
             .eq("user_id", existingUser.id)
             .maybeSingle();
 
           if (oldStudent) {
+            // Pembersihan foto lama siswa terdeteksi rejected sebelum baris database dihapus
+            if (oldStudent.avatar_url) {
+              const parts = oldStudent.avatar_url.split("/images/");
+              if (parts.length > 1) {
+                await supabase.storage.from("images").remove([parts[1]]);
+              }
+            }
+
             await supabase.from("student_enrollments").delete().eq("student_id", oldStudent.id);
             await supabase.from("payments").delete().eq("student_id", oldStudent.id);
             await supabase.from("attendance_logs").delete().eq("student_id", oldStudent.id);
@@ -257,12 +265,14 @@ export default function Register() {
             contentType: "image/webp",
           });
 
-        if (!uploadError) {
-          const { data: publicUrlData } = supabase.storage
-            .from("images")
-            .getPublicUrl(uploadedFilePath);
-          uploadedAvatarUrl = publicUrlData?.publicUrl || null;
+        if (uploadError) {
+          throw new Error("Gagal mengunggah foto profil: " + uploadError.message);
         }
+
+        const { data: publicUrlData } = supabase.storage
+          .from("images")
+          .getPublicUrl(uploadedFilePath);
+        uploadedAvatarUrl = publicUrlData?.publicUrl || null;
       }
 
       // 5. Simpan data detail atlet ke tabel students
@@ -282,18 +292,14 @@ export default function Register() {
         .insert([studentPayload]);
 
       if (studentError) {
-        delete studentPayload.avatar_url;
-        const { error: fallbackError } = await supabase
-          .from("students")
-          .insert([studentPayload]);
-
-        if (fallbackError) throw fallbackError;
+        throw studentError;
       }
 
       setRegisteredNis(targetNis.trim());
       toast.success("Pendaftaran berhasil dicatat!", { id: loadingToast });
       setSuccess(true);
     } catch (error) {
+      // Cleanup transaksi saat terjadi kegagalan (Rollback atomis)
       if (createdUserId) {
         await supabase.from("students").delete().eq("user_id", createdUserId);
         await supabase.from("users").delete().eq("id", createdUserId);
@@ -552,7 +558,7 @@ export default function Register() {
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">
-                      NIS (Otomatis)
+                      NIS 
                     </label>
                     <div className="relative">
                       <Hash size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-blue-500" />
@@ -585,7 +591,7 @@ export default function Register() {
 
                 <div>
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">
-                    Nama Orang Tua / Wali
+                    Nama Orang Tua 
                   </label>
                   <input
                     required
@@ -594,7 +600,7 @@ export default function Register() {
                     onChange={handleChange}
                     disabled={loading}
                     className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 font-medium"
-                    placeholder="Nama orang tua/wali"
+                    placeholder="Nama orang tua"
                   />
                 </div>
 

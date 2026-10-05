@@ -459,6 +459,19 @@ export default function CoachManage() {
 
   return (
     <div className="min-h-screen bg-[#f8fafc] p-4 md:p-8 font-sans">
+      {/* CSS untuk Menyembunyikan Seluruh Scrollbar Tanpa Menghilangkan Fungsi Scroll */}
+      <style>{`
+        ::-webkit-scrollbar {
+          display: none !important;
+          width: 0px !important;
+          height: 0px !important;
+        }
+        * {
+          -ms-overflow-style: none !important;
+          scrollbar-width: none !important;
+        }
+      `}</style>
+
       <Toaster position="top-right" />
 
       <CustomConfirmModal
@@ -638,7 +651,7 @@ export default function CoachManage() {
                     <div className="flex items-center justify-between mb-1">
                       <label className={labelCls}>Kata Sandi</label>
                       <span className="text-[10px] text-slate-400 italic">
-                        {isEditing ? "(Kata sandi akun saat ini)" : "(Minimal 6 karakter)"}
+                        {isEditing ? " " : "(Minimal 6 karakter)"}
                       </span>
                     </div>
                     <div className="relative">
@@ -677,7 +690,7 @@ export default function CoachManage() {
                     />
                   </div>
                   <div>
-                    <label className={labelCls}>Posisi / Gelar</label>
+                    <label className={labelCls}>Posisi </label>
                     <input
                       required
                       value={form.role_title}

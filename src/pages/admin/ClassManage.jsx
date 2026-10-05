@@ -590,6 +590,19 @@ export default function ClassManage() {
 
   return (
     <div className="min-h-screen bg-[#f8fafc] p-4 md:p-8 font-sans relative">
+      {/* CSS untuk Menyembunyikan Seluruh Scrollbar Tanpa Menghilangkan Fungsi Scroll */}
+      <style>{`
+        ::-webkit-scrollbar {
+          display: none !important;
+          width: 0px !important;
+          height: 0px !important;
+        }
+        * {
+          -ms-overflow-style: none !important;
+          scrollbar-width: none !important;
+        }
+      `}</style>
+
       <Toaster
         position="top-right"
         toastOptions={{ style: { borderRadius: "16px", fontWeight: "500" } }}
@@ -1032,7 +1045,7 @@ export default function ClassManage() {
                 <div className="space-y-2 p-4 bg-slate-50 border border-slate-100 rounded-2xl">
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
                     <Calendar size={14} className="text-blue-600" />
-                    Pilihan Hari Latihan (Opsional)
+                    Pilihan Hari Latihan 
                   </label>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
                     {DAYS_OF_WEEK.map((day) => {
@@ -1122,7 +1135,7 @@ export default function ClassManage() {
 
                 <div className="space-y-1.5">
                   <label className="text-xs font-bold text-slate-400 uppercase tracking-wider ml-1">
-                    Biaya Pendaftaran / Harga (IDR)
+                    Biaya Pendaftaran  (IDR)
                   </label>
                   <div className="relative">
                     <span className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 font-bold">

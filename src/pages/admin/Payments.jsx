@@ -17,13 +17,13 @@ import {
   ZoomIn,
   ZoomOut,
   RotateCw,
-  RotateCcw,
   User,
   Wallet,
   Calendar,
   Upload,
   CheckCheck,
   Download,
+  CalendarX,
 } from "lucide-react";
 
 function CustomConfirmModal({
@@ -84,6 +84,11 @@ export default function Payments() {
   const [actionLoading, setActionLoading] = useState(false);
   const [isRejecting, setIsRejecting] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
+
+  // State untuk Tanggal Mulai Latihan (start_date) di modal verifikasi admin
+  const [customStartDate, setCustomStartDate] = useState(
+    new Date().toISOString().split("T")[0]
+  );
 
   // State Match Mutasi Ketat
   const [matchedIds, setMatchedIds] = useState(new Set());
@@ -162,7 +167,12 @@ export default function Payments() {
         .from("payments")
         .select(`
           *,
-          students ( id, nis, users ( full_name ) ),
+          students ( 
+            id, 
+            nis, 
+            users ( full_name ),
+            student_enrollments ( id, class_id, status )
+          ),
           classes ( id, name, max_capacity )
         `)
         .order("created_at", { ascending: false });
@@ -178,6 +188,19 @@ export default function Payments() {
   useEffect(() => {
     fetchPayments();
   }, []);
+
+  const isEnrollmentExpired = (payment) => {
+    if (payment.status !== "approved") return false;
+
+    const enrollments = payment.students?.student_enrollments;
+    if (!enrollments || enrollments.length === 0) return false;
+
+    const targetEnrollment = enrollments.find(
+      (e) => e.class_id === payment.class_id
+    );
+
+    return targetEnrollment ? targetEnrollment.status === "completed" : false;
+  };
 
   // Fitur Export Transaksi Pending ke CSV
   const handleExportPendingCSV = () => {
@@ -234,7 +257,7 @@ export default function Payments() {
     toast.success(`Berhasil mengunduh ${pendingList.length} data transaksi pending!`);
   };
 
-  // Handler Auto-Match Mutasi Ketat (Tanggal + Nama Pengirim/Atlet + Nominal)
+  // Handler Auto-Match Mutasi Ketat
   const handleFileUpload = (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -335,6 +358,8 @@ export default function Payments() {
       if (filterStatus === "bundling") {
         const key = `${p.student_id}_${p.receipt_url}`;
         matchesStatus = (bundleReceiptMap.get(key) || 0) > 1;
+      } else if (filterStatus === "expired") {
+        matchesStatus = isEnrollmentExpired(p);
       } else if (filterStatus !== "all") {
         matchesStatus = p.status === filterStatus;
       }
@@ -363,11 +388,16 @@ export default function Payments() {
     }).length;
   }, [payments, bundleReceiptMap]);
 
+  const expiredCount = useMemo(() => {
+    return payments.filter((p) => isEnrollmentExpired(p)).length;
+  }, [payments]);
+
   const counts = {
     pending: payments.filter((p) => p.status === "pending").length,
     approved: payments.filter((p) => p.status === "approved").length,
     rejected: payments.filter((p) => p.status === "rejected").length,
     bundling: bundlingCount,
+    expired: expiredCount,
   };
 
   const toggleSelectOne = (id) => {
@@ -402,6 +432,8 @@ export default function Payments() {
     setSelectedPayment(payment);
     setIsRejecting(false);
     setRejectReason("");
+    const todayStr = new Date().toISOString().split("T")[0];
+    setCustomStartDate(todayStr);
     resetImageViewer();
     setIsModalOpen(true);
   };
@@ -411,22 +443,28 @@ export default function Payments() {
   const handleRotateRight = () => setImageRotation((prev) => (prev + 90) % 360);
 
   const processApproval = async (paymentItem, adminId) => {
+    const effectiveStartDate = customStartDate
+      ? new Date(customStartDate).toISOString()
+      : new Date().toISOString();
+
     const { error: rpcError } = await supabase.rpc("approve_student_payment", {
       p_payment_id: paymentItem.id,
       p_admin_id: adminId || null,
+      p_start_date: effectiveStartDate,
     });
 
     if (!rpcError) return;
 
-    const { data: existingActive } = await supabase
+    const { data: existingEnrollment, error: existingEnrollmentError } = await supabase
       .from("student_enrollments")
-      .select("id")
+      .select("id, status")
       .eq("student_id", paymentItem.student_id)
       .eq("class_id", paymentItem.class_id)
-      .eq("status", "active")
       .maybeSingle();
 
-    if (existingActive) {
+    if (existingEnrollmentError) throw existingEnrollmentError;
+
+    if (existingEnrollment?.status === "active") {
       throw new Error(`Atlet sudah aktif di kelas ${paymentItem.classes?.name}.`);
     }
 
@@ -454,11 +492,29 @@ export default function Payments() {
 
     if (updateError) throw updateError;
 
+    if (existingEnrollment) {
+      const { error: enrollUpdateError } = await supabase
+        .from("student_enrollments")
+        .update({
+          status: "active",
+          start_date: effectiveStartDate,
+          enrolled_at: effectiveStartDate,
+          completed_at: null,
+        })
+        .eq("id", existingEnrollment.id);
+
+      if (enrollUpdateError) throw enrollUpdateError;
+      return;
+    }
+
     const { error: enrollError } = await supabase.from("student_enrollments").insert([
       {
         student_id: paymentItem.student_id,
         class_id: paymentItem.class_id,
         status: "active",
+        start_date: effectiveStartDate,
+        enrolled_at: effectiveStartDate,
+        completed_at: null,
       },
     ]);
 
@@ -626,7 +682,14 @@ export default function Payments() {
     }).format(Number(number) || 0);
   };
 
-  const getStatusBadge = (status) => {
+  const getStatusBadge = (status, isExpired = false) => {
+    if (isExpired) {
+      return (
+        <span className="px-2.5 py-1 bg-purple-600 text-white rounded-lg text-[10px] font-black uppercase tracking-wider border border-purple-700 shadow-sm flex items-center gap-1">
+          <CalendarX size={12} /> Masa Latihan Habis
+        </span>
+      );
+    }
     if (status === "approved") {
       return (
         <span className="px-2.5 py-1 bg-emerald-600 text-white rounded-lg text-[10px] font-black uppercase tracking-wider border border-emerald-700 shadow-sm">
@@ -650,20 +713,16 @@ export default function Payments() {
 
   return (
     <div className="min-h-screen bg-[#f8fafc] p-4 md:p-8 font-sans">
+      {/* CSS untuk Menyembunyikan Seluruh Scrollbar Tanpa Menghilangkan Fungsi Scroll */}
       <style>{`
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 5px;
-          height: 5px;
+        ::-webkit-scrollbar {
+          display: none !important;
+          width: 0px !important;
+          height: 0px !important;
         }
-        .custom-scrollbar::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: rgba(148, 163, 184, 0.4);
-          border-radius: 9999px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: rgba(100, 116, 139, 0.6);
+        * {
+          -ms-overflow-style: none !important;
+          scrollbar-width: none !important;
         }
       `}</style>
 
@@ -776,6 +835,25 @@ export default function Payments() {
 
         <button
           onClick={() => {
+            setFilterStatus("expired");
+            setSelectedIds([]);
+          }}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-xs sm:text-sm whitespace-nowrap transition-all ${
+            filterStatus === "expired"
+              ? "bg-purple-600 text-white shadow-md shadow-purple-600/20"
+              : "text-slate-600 hover:bg-slate-50"
+          }`}
+        >
+          <CalendarX size={16} /> Masa Latihan Habis
+          {counts.expired > 0 && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-white/20 text-white font-bold">
+              {counts.expired}
+            </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => {
             setFilterStatus("approved");
             setSelectedIds([]);
           }}
@@ -790,6 +868,7 @@ export default function Payments() {
             {counts.approved}
           </span>
         </button>
+
         <button
           onClick={() => {
             setFilterStatus("rejected");
@@ -806,6 +885,7 @@ export default function Payments() {
             {counts.rejected}
           </span>
         </button>
+
         <button
           onClick={() => {
             setFilterStatus("all");
@@ -878,6 +958,7 @@ export default function Payments() {
               {filteredPayments.map((p) => {
                 const isSelected = selectedIds.includes(p.id);
                 const isMatched = matchedIds.has(p.id);
+                const expired = isEnrollmentExpired(p);
                 const dateObj = new Date(p.created_at);
                 const dateStr = dateObj.toLocaleDateString("id-ID", {
                   day: "numeric",
@@ -896,6 +977,8 @@ export default function Payments() {
                     className={`transition-colors ${
                       isMatched
                         ? "bg-emerald-50/80 hover:bg-emerald-100/60"
+                        : expired
+                        ? "bg-purple-50/50 hover:bg-purple-50"
                         : isSelected
                         ? "bg-blue-50/60"
                         : "hover:bg-slate-50/50"
@@ -959,7 +1042,7 @@ export default function Payments() {
                     <td className="px-6 py-4">
                       <span className="font-bold text-slate-700 text-sm">{p.classes?.name}</span>
                     </td>
-                    <td className="px-6 py-4 text-center">{getStatusBadge(p.status)}</td>
+                    <td className="px-6 py-4 text-center">{getStatusBadge(p.status, expired)}</td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex justify-end gap-1.5">
                         <button
@@ -989,6 +1072,7 @@ export default function Payments() {
           {filteredPayments.map((p) => {
             const isSelected = selectedIds.includes(p.id);
             const isMatched = matchedIds.has(p.id);
+            const expired = isEnrollmentExpired(p);
             const dateObj = new Date(p.created_at);
             const dateStr = dateObj.toLocaleDateString("id-ID", { day: "numeric", month: "short" });
 
@@ -998,6 +1082,8 @@ export default function Payments() {
                 className={`bg-white border rounded-2xl p-4 shadow-sm space-y-3 transition-all ${
                   isMatched
                     ? "border-emerald-500 bg-emerald-50/40"
+                    : expired
+                    ? "border-purple-300 bg-purple-50/30"
                     : isSelected
                     ? "border-blue-500 ring-1 ring-blue-500 bg-blue-50/30"
                     : "border-slate-200"
@@ -1028,7 +1114,7 @@ export default function Payments() {
                       <p className="text-xs text-slate-400">NIS: {p.students?.nis}</p>
                     </div>
                   </div>
-                  {getStatusBadge(p.status)}
+                  {getStatusBadge(p.status, expired)}
                 </div>
 
                 {(p.sender_name || p.sender_bank) && (
@@ -1204,6 +1290,25 @@ export default function Payments() {
                 <span className="text-slate-500">Bank / E-Wallet Asal:</span>
                 <span className="font-bold text-emerald-700">{selectedPayment.sender_bank || "-"}</span>
               </div>
+
+              {/* Form Input Date Picker untuk "Tanggal Mulai Latihan" */}
+              {selectedPayment.status === "pending" && (
+                <div className="pt-2 border-t border-slate-200 space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1">
+                    <Calendar size={12} className="text-blue-600" /> Tanggal Mulai Latihan
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={customStartDate}
+                    onChange={(e) => setCustomStartDate(e.target.value)}
+                    className="w-full p-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <p className="text-[10px] text-slate-400">
+                    Sesi kelas latihan murid akan secara otomatis dihitung mulai dari tanggal ini.
+                  </p>
+                </div>
+              )}
 
               {relatedPayments.length > 1 ? (
                 <div className="pt-2 border-t border-slate-200 space-y-1.5">

@@ -240,6 +240,19 @@ export default function AnnouncementManage() {
 
   return (
     <div className="min-h-screen bg-[#f8fafc] p-4 md:p-8 font-sans">
+      {/* CSS untuk Menyembunyikan Seluruh Scrollbar Tanpa Menghilangkan Fungsi Scroll */}
+      <style>{`
+        ::-webkit-scrollbar {
+          display: none !important;
+          width: 0px !important;
+          height: 0px !important;
+        }
+        * {
+          -ms-overflow-style: none !important;
+          scrollbar-width: none !important;
+        }
+      `}</style>
+
       <Toaster position="top-right" />
 
       <CustomConfirmModal
@@ -323,10 +336,10 @@ export default function AnnouncementManage() {
             <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
               <button
                 onClick={() => toggleStatus(item)}
-                className={`text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-all ${
+                className={`inline-flex items-center justify-center min-w-[110px] text-[10px] font-black uppercase tracking-wide px-3 py-2 rounded-xl border shadow-sm transition-all active:scale-[0.98] ${
                   item.is_active
-                    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                    : "bg-slate-100 text-slate-500 border-slate-200"
+                    ? "bg-emerald-500 text-white border-emerald-500 shadow-emerald-500/20 hover:bg-emerald-600"
+                    : "bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200"
                 }`}
               >
                 {item.is_active ? "Aktif Tayang" : "Nonaktif"}

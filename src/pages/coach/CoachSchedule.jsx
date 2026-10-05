@@ -131,11 +131,11 @@ export default function CoachSchedule() {
         return;
       }
 
-      // Ambil seluruh siswa aktif di kelas-kelas sesi ini beserta avatar_url dan created_at
+      // Ambil seluruh siswa aktif di kelas-kelas sesi ini beserta avatar_url, start_date, dan created_at
       let enrollRes = await supabase
         .from("student_enrollments")
         .select(`
-          id, class_id, status, created_at,
+          id, class_id, status, start_date, created_at,
           classes ( id, name ),
           students (
             id, nis, parent_name, phone_number, avatar_url,
@@ -145,7 +145,7 @@ export default function CoachSchedule() {
         .in("class_id", session.class_ids)
         .eq("status", "active");
 
-      // Fallback jika tabel belum memiliki avatar_url
+      // Fallback jika tabel belum memiliki avatar_url atau start_date
       if (enrollRes.error) {
         enrollRes = await supabase
           .from("student_enrollments")
@@ -163,11 +163,19 @@ export default function CoachSchedule() {
 
       if (enrollRes.error) throw enrollRes.error;
 
-      // Filter murid: Hanya ambil murid yang terdaftar sebelum atau tepat saat sesi dilaksanakan
-      const sessionTime = new Date(session.session_date).getTime();
+      // PERBAIKAN: Normalisasi tanggal ke awal hari (00:00:00) agar membandingkan berdasarkan tanggal kalender
+      const sessionDateObj = new Date(session.session_date);
+      sessionDateObj.setHours(0, 0, 0, 0);
+      const sessionTime = sessionDateObj.getTime();
+
       const validEnrollments = (enrollRes.data || []).filter((item) => {
-        const enrollTime = new Date(item.created_at).getTime();
-        return enrollTime <= sessionTime;
+        const rawStartDate = item.start_date || item.created_at;
+        if (!rawStartDate) return true;
+
+        const startDateObj = new Date(rawStartDate);
+        startDateObj.setHours(0, 0, 0, 0);
+
+        return startDateObj.getTime() <= sessionTime;
       });
 
       // Ambil riwayat absensi pada sesi ini untuk mengetahui status murid
@@ -291,7 +299,7 @@ export default function CoachSchedule() {
     if (s === "alpa") {
       return (
         <span className="px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-rose-50 text-rose-700 border border-rose-200" title="Terhitung memotong kuota sesi">
-          Alpa (Terhitung Sesi)
+          Alpa 
         </span>
       );
     }
@@ -305,6 +313,25 @@ export default function CoachSchedule() {
   if (loading) {
     return (
       <div className="min-h-[70vh] flex flex-col items-center justify-center font-sans">
+        <style>{`
+          html, body, #root {
+            overflow-x: hidden !important;
+          }
+
+          html, body, #root, * {
+            -ms-overflow-style: none !important;
+            scrollbar-width: none !important;
+          }
+
+          html::-webkit-scrollbar,
+          body::-webkit-scrollbar,
+          #root::-webkit-scrollbar,
+          *::-webkit-scrollbar {
+            display: none !important;
+            width: 0px !important;
+            height: 0px !important;
+          }
+        `}</style>
         <div className="w-10 h-10 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-3"></div>
         <p className="text-slate-500 text-sm font-medium animate-pulse">Memuat jadwal tugas melatih...</p>
       </div>
@@ -313,6 +340,25 @@ export default function CoachSchedule() {
 
   return (
     <div className="min-h-screen bg-[#f8fafc] p-4 md:p-8 font-sans">
+      <style>{`
+        html, body, #root {
+          overflow-x: hidden !important;
+        }
+
+        html, body, #root, * {
+          -ms-overflow-style: none !important;
+          scrollbar-width: none !important;
+        }
+
+        html::-webkit-scrollbar,
+        body::-webkit-scrollbar,
+        #root::-webkit-scrollbar,
+        *::-webkit-scrollbar {
+          display: none !important;
+          width: 0px !important;
+          height: 0px !important;
+        }
+      `}</style>
       <Toaster position="top-right" />
 
       {/* Modal Pratinjau Foto Siswa Ukuran Penuh */}

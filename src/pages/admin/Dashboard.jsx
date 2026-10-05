@@ -274,6 +274,17 @@ export default function Dashboard() {
   if (loading) {
     return (
       <div className="min-h-screen bg-[#f8fafc] flex flex-col items-center justify-center font-sans">
+        <style>{`
+          ::-webkit-scrollbar {
+            display: none !important;
+            width: 0px !important;
+            height: 0px !important;
+          }
+          * {
+            -ms-overflow-style: none !important;
+            scrollbar-width: none !important;
+          }
+        `}</style>
         <Loader2 size={40} className="text-blue-600 animate-spin mb-4" />
         <p className="text-slate-500 font-medium animate-pulse">
           Menganalisis metrik dasbor...
@@ -284,6 +295,19 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-[#f8fafc] p-4 md:p-8 font-sans">
+      {/* CSS untuk Menyembunyikan Seluruh Scrollbar Tanpa Menghilangkan Fungsi Scroll */}
+      <style>{`
+        ::-webkit-scrollbar {
+          display: none !important;
+          width: 0px !important;
+          height: 0px !important;
+        }
+        * {
+          -ms-overflow-style: none !important;
+          scrollbar-width: none !important;
+        }
+      `}</style>
+
       <div className="max-w-7xl mx-auto mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">
@@ -297,7 +321,7 @@ export default function Dashboard() {
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-full border border-emerald-200 text-xs font-semibold">
             <Radio size={14} className="animate-pulse text-emerald-500" />
-            <span>Live Realtime Active</span>
+            <span>Live </span>
           </div>
 
           <button
@@ -349,7 +373,7 @@ export default function Dashboard() {
         <div className="bg-white p-6 rounded-3xl shadow-xl shadow-blue-900/5 border border-slate-100 flex flex-col justify-between hover:-translate-y-1 transition-transform duration-300">
           <div className="flex items-center justify-between mb-3">
             <span className="text-slate-400 text-[10px] font-black uppercase tracking-widest">
-              Storage File (Supabase Bucket)
+              Storage File 
             </span>
             <div className="w-9 h-9 rounded-xl bg-cyan-50 text-cyan-600 flex items-center justify-center shrink-0">
               <HardDrive size={18} />
@@ -386,7 +410,7 @@ export default function Dashboard() {
         <div className="bg-white p-6 rounded-3xl shadow-xl shadow-blue-900/5 border border-slate-100 flex flex-col justify-between hover:-translate-y-1 transition-transform duration-300">
           <div className="flex items-center justify-between mb-3">
             <span className="text-slate-400 text-[10px] font-black uppercase tracking-widest">
-              Penyimpanan Database (PostgreSQL)
+               Database 
             </span>
             <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
               <Database size={18} />

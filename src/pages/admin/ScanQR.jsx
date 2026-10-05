@@ -231,14 +231,15 @@ export default function ScanQR() {
         throw new Error("Sesi ini belum dikonfigurasi dengan kelas latihan.");
       }
 
-      const { data: enrollments, error: enrollError } = await supabase
+      // Ambil data pendaftaran murid beserta kolom start_date dan created_at
+      const { data: rawEnrollments, error: enrollError } = await supabase
         .from("student_enrollments")
-        .select("id, class_id, status, classes(name, max_sessions)")
+        .select("id, class_id, status, start_date, created_at, classes(name, max_sessions)")
         .eq("student_id", student.id)
         .eq("status", "active")
         .in("class_id", sessionObj.class_ids);
 
-      if (enrollError || !enrollments || enrollments.length === 0) {
+      if (enrollError || !rawEnrollments || rawEnrollments.length === 0) {
         const { data: completedEnrollment } = await supabase
           .from("student_enrollments")
           .select("id, classes(name)")
@@ -252,6 +253,17 @@ export default function ScanQR() {
         }
 
         throw new Error("Atlet tidak terdaftar aktif di kelompok kelas sesi ini.");
+      }
+
+      // Menyaring pendaftaran agar hanya memproses murid yang start_date nya <= tanggal sesi
+      const sessionTime = new Date(sessionObj.session_date).getTime();
+      const enrollments = rawEnrollments.filter((enr) => {
+        const startTime = new Date(enr.start_date || enr.created_at).getTime();
+        return startTime <= sessionTime;
+      });
+
+      if (enrollments.length === 0) {
+        throw new Error(`Kelas atlet belum memasuki tanggal aktif latihan.`);
       }
 
       const { data: currentSessionLogs, error: logFetchError } = await supabase
@@ -385,6 +397,19 @@ export default function ScanQR() {
 
   return (
     <div className="min-h-screen bg-[#f8fafc] p-4 md:p-8 font-sans">
+      {/* CSS untuk Menyembunyikan Seluruh Scrollbar Tanpa Menghilangkan Fungsi Scroll */}
+      <style>{`
+        ::-webkit-scrollbar {
+          display: none !important;
+          width: 0px !important;
+          height: 0px !important;
+        }
+        * {
+          -ms-overflow-style: none !important;
+          scrollbar-width: none !important;
+        }
+      `}</style>
+
       <Toaster position="top-right" />
 
       {/* Dialog Pemilihan Kelas Multi-Enrollment */}

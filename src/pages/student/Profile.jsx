@@ -6,7 +6,7 @@ import {
   Download, User, MapPin, Phone,
   ShieldCheck, Contact, Edit3, X, Save,
   Mail, Lock, Eye, EyeOff, Calendar, Layers, CheckCircle2, AlertCircle, Bell, Info, Clock,
-  Sun, Maximize2, Sparkles, Camera, Image as ImageIcon, Trash2
+  Maximize2, Sparkles, Camera, Image as ImageIcon, Trash2
 } from "lucide-react";
 
 // Helper: Kompresi gambar client-side menggunakan HTML5 Canvas
@@ -137,8 +137,6 @@ export default function Profile() {
   const qrRef = useRef(null);
   const fullscreenQrRef = useRef(null);
 
-  // State Fitur Optimasi Pindai Kolam
-  const [highBrightnessMode, setHighBrightnessMode] = useState(false);
   const [isFullscreenQrOpen, setIsFullscreenQrOpen] = useState(false);
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -406,7 +404,18 @@ export default function Profile() {
 
   if (loading) {
     return (
-      <div className="min-h-[70vh] flex flex-col items-center justify-center font-sans">
+      <div className="min-h-[70vh] flex flex-col items-center justify-center font-sans bg-[#f8fafc] text-slate-900">
+        <style>{`
+          ::-webkit-scrollbar {
+            display: none !important;
+            width: 0px !important;
+            height: 0px !important;
+          }
+          * {
+            -ms-overflow-style: none !important;
+            scrollbar-width: none !important;
+          }
+        `}</style>
         <div className="w-12 h-12 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-4"></div>
         <p className="text-slate-500 font-medium animate-pulse">Memuat Kartu Digital...</p>
       </div>
@@ -415,7 +424,18 @@ export default function Profile() {
 
   if (!studentData) {
     return (
-      <div className="min-h-[70vh] flex flex-col items-center justify-center text-center px-6 font-sans">
+      <div className="min-h-[70vh] flex flex-col items-center justify-center text-center px-6 font-sans bg-[#f8fafc] text-slate-900">
+        <style>{`
+          ::-webkit-scrollbar {
+            display: none !important;
+            width: 0px !important;
+            height: 0px !important;
+          }
+          * {
+            -ms-overflow-style: none !important;
+            scrollbar-width: none !important;
+          }
+        `}</style>
         <div className="w-20 h-20 bg-rose-50 text-rose-500 rounded-full flex items-center justify-center mb-4">
           <Contact size={32} />
         </div>
@@ -426,7 +446,20 @@ export default function Profile() {
   }
 
   return (
-    <div className="py-6 flex flex-col items-center pb-24 lg:pb-6 font-sans relative px-4">
+    <div className="py-6 flex flex-col items-center pb-24 lg:pb-6 font-sans relative px-4 bg-[#f8fafc] text-slate-900 min-h-screen">
+      {/* CSS untuk Menyembunyikan Seluruh Scrollbar Tanpa Menghilangkan Fungsi Scroll & Memaksa Mode Terang */}
+      <style>{`
+        ::-webkit-scrollbar {
+          display: none !important;
+          width: 0px !important;
+          height: 0px !important;
+        }
+        * {
+          -ms-overflow-style: none !important;
+          scrollbar-width: none !important;
+        }
+      `}</style>
+
       <Toaster position="top-center" toastOptions={{ style: { borderRadius: '16px', fontWeight: '500' } }} />
       
       {/* Papan Pengumuman Klub */}
@@ -437,30 +470,11 @@ export default function Profile() {
         <p className="text-slate-500 text-sm mt-1">Tunjukkan kode QR ini untuk pemindaian kehadiran latihan.</p>
       </div>
 
-      {/* Kontrol Cepat Pemindaian di Kolam Renang */}
-      <div className="w-full max-w-sm mb-4 flex gap-2">
-        <button
-          type="button"
-          onClick={() => {
-            setHighBrightnessMode(!highBrightnessMode);
-            if (!highBrightnessMode) {
-              toast.success("Mode Kontras Terang diaktifkan!");
-            }
-          }}
-          className={`flex-1 py-2.5 px-3 rounded-2xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-95 border ${
-            highBrightnessMode
-              ? "bg-amber-400 text-amber-950 border-amber-500 shadow-sm"
-              : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50 shadow-xs"
-          }`}
-        >
-          <Sun size={15} className={highBrightnessMode ? "text-amber-950" : "text-amber-500"} />
-          <span>{highBrightnessMode ? "Kontras Normal" : "Mode Pindai Terang"}</span>
-        </button>
-
+      <div className="w-full max-w-sm mb-4 flex justify-end">
         <button
           type="button"
           onClick={() => setIsFullscreenQrOpen(true)}
-          className="py-2.5 px-3.5 bg-white border border-slate-200 hover:bg-slate-50 text-blue-600 rounded-2xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 active:scale-95"
+          className="py-2.5 px-3.5 bg-white border border-slate-200 hover:bg-slate-50 text-blue-600 rounded-2xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 active:scale-95"
           title="Tampilkan QR Layar Penuh"
         >
           <Maximize2 size={15} />
@@ -469,18 +483,12 @@ export default function Profile() {
       </div>
 
       <div className="w-full max-w-sm relative group">
-        {!highBrightnessMode && (
-          <div className="absolute -inset-1 bg-gradient-to-b from-blue-600 to-cyan-400 rounded-[2.5rem] blur-lg opacity-20 group-hover:opacity-40 transition duration-500"></div>
-        )}
-        
-        <div className={`relative rounded-[2rem] overflow-hidden flex flex-col transition-all duration-300 ${
-          highBrightnessMode
-            ? "bg-white border-4 border-slate-900 shadow-2xl"
-            : "bg-white rounded-[2rem] shadow-2xl border border-slate-100"
-        }`}>
-          <div className={`${highBrightnessMode ? "bg-slate-950 p-5" : "bg-[#0a192f] p-6"} relative overflow-hidden`}>
+        <div className="absolute -inset-1 bg-gradient-to-b from-blue-600 to-cyan-400 rounded-[2.5rem] blur-lg opacity-20 group-hover:opacity-40 transition duration-500"></div>
+
+        <div className="relative rounded-[2rem] overflow-hidden flex flex-col transition-all duration-300 bg-white shadow-[0_16px_40px_rgba(15,23,42,0.08)] border border-slate-200/80">
+          <div className="bg-[#0a192f] px-5 py-6 relative overflow-hidden rounded-t-[2rem]">
             <ShieldCheck size={120} className="absolute -right-6 -top-6 text-white/5 rotate-12" />
-            
+
             <div className="relative z-10 flex flex-col items-center text-center">
               {/* Foto Profil Atlet atau Fallback SB Logo */}
               {studentData.avatar_url ? (
@@ -543,19 +551,15 @@ export default function Profile() {
             </div>
           </div>
 
-          <div className={`p-8 flex flex-col items-center relative z-10 ${highBrightnessMode ? "bg-white" : "bg-white"}`}>
-            <div 
-              ref={qrRef} 
-              className={`p-3 bg-white rounded-3xl transition-transform duration-500 ${
-                highBrightnessMode 
-                  ? "border-4 border-black p-4 shadow-none" 
-                  : "shadow-[0_0_40px_rgba(0,0,0,0.08)] border border-slate-50 group-hover:scale-105"
-              }`}
+          <div className="px-5 py-7 flex flex-col items-center relative z-10 bg-white">
+            <div
+              ref={qrRef}
+              className="p-3.5 bg-white rounded-[1.75rem] transition-transform duration-500 shadow-[0_0_30px_rgba(59,130,246,0.08)] border border-slate-100 group-hover:scale-[1.02]"
             >
               {studentData.qr_token ? (
                 <QRCodeSVG
                   value={studentData.qr_token}
-                  size={highBrightnessMode ? 190 : 180}
+                  size={180}
                   level={"H"}
                   includeMargin={false}
                   fgColor="#000000"
@@ -566,28 +570,26 @@ export default function Profile() {
                 </div>
               )}
             </div>
-            <p className={`mt-5 font-mono text-xs tracking-widest font-bold ${
-              highBrightnessMode ? "text-slate-900 text-sm" : "text-slate-400"
-            }`}>
+            <p className="mt-5 font-mono text-xs tracking-widest font-bold text-slate-400">
               ID: {studentData.nis}
             </p>
           </div>
 
           {/* Rincian Data Pribadi Atlet */}
-          <div className="bg-slate-50 p-6 border-t border-slate-100 flex flex-col gap-3">
-            <div className="flex items-center gap-3 text-sm">
+          <div className="bg-slate-50/80 p-5 border-t border-slate-100 flex flex-col gap-3">
+            <div className="flex items-center gap-3 text-sm rounded-2xl bg-white px-3 py-2.5 border border-slate-100 shadow-[0_1px_2px_rgba(15,23,42,0.02)]">
               <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 flex-shrink-0">
                 <User size={14} />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-[10px] font-bold text-slate-400 uppercase">Nama Orang Tua / Wali</p>
+                <p className="text-[10px] font-bold text-slate-400 uppercase">Nama Orang Tua </p>
                 <p className="text-slate-700 font-medium truncate">
                   {studentData.parent_name || "-"}
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-3 text-sm">
+            <div className="flex items-center gap-3 text-sm rounded-2xl bg-white px-3 py-2.5 border border-slate-100 shadow-[0_1px_2px_rgba(15,23,42,0.02)]">
               <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 flex-shrink-0">
                 <Calendar size={14} />
               </div>
@@ -599,7 +601,7 @@ export default function Profile() {
               </div>
             </div>
 
-            <div className="flex items-center gap-3 text-sm">
+            <div className="flex items-center gap-3 text-sm rounded-2xl bg-white px-3 py-2.5 border border-slate-100 shadow-[0_1px_2px_rgba(15,23,42,0.02)]">
               <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 flex-shrink-0">
                 <Phone size={14} />
               </div>
@@ -609,7 +611,7 @@ export default function Profile() {
               </div>
             </div>
 
-            <div className="flex items-center gap-3 text-sm">
+            <div className="flex items-center gap-3 text-sm rounded-2xl bg-white px-3 py-2.5 border border-slate-100 shadow-[0_1px_2px_rgba(15,23,42,0.02)]">
               <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center text-amber-600 flex-shrink-0">
                 <MapPin size={14} />
               </div>
@@ -622,7 +624,7 @@ export default function Profile() {
         </div>
       </div>
 
-      <div className="mt-8 w-full max-w-sm px-4 flex flex-col gap-3">
+      <div className="mt-8 w-full max-w-sm px-1 flex flex-col gap-3">
         <button
           onClick={handleDownloadQR}
           className="w-full flex items-center justify-center gap-2 py-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-2xl shadow-lg shadow-blue-600/30 transition-all active:scale-95 text-xs sm:text-sm"
@@ -641,8 +643,8 @@ export default function Profile() {
 
       {/* Modal Layar Penuh QR Code */}
       {isFullscreenQrOpen && (
-        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center p-4 bg-black/90 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-[2.5rem] p-8 max-w-sm w-full flex flex-col items-center text-center shadow-2xl relative">
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center p-4 bg-black/95 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-[2.25rem] p-6 max-w-sm w-full flex flex-col items-center text-center shadow-[0_20px_60px_rgba(15,23,42,0.35)] relative text-slate-900">
             <button
               type="button"
               onClick={() => setIsFullscreenQrOpen(false)}
@@ -663,9 +665,9 @@ export default function Profile() {
               NIS: {studentData.nis}
             </p>
 
-            <div 
+            <div
               ref={fullscreenQrRef}
-              className="p-4 bg-white border-4 border-slate-900 rounded-3xl shadow-lg"
+              className="p-4 bg-white border-4 border-slate-900 rounded-[1.75rem] shadow-[0_10px_25px_rgba(15,23,42,0.12)]"
             >
               {studentData.qr_token ? (
                 <QRCodeSVG
@@ -692,7 +694,7 @@ export default function Profile() {
       {/* Modal Pengaturan Akun & Edit Profil */}
       {isEditModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200 max-h-[90vh] flex flex-col">
+          <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200 max-h-[90vh] flex flex-col text-slate-900">
             
             <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 sticky top-0 z-10">
               <div className="flex items-center gap-3 text-blue-600">
@@ -797,13 +799,13 @@ export default function Profile() {
                     <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider ml-1">Alamat Email</label>
                     <div className="relative">
                       <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                      <input required type="email" value={editForm.email} onChange={e => setEditForm({...editForm, email: e.target.value})} className="w-full pl-9 pr-4 py-3 text-sm bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all shadow-sm" />
+                      <input required type="email" value={editForm.email} onChange={e => setEditForm({...editForm, email: e.target.value})} className="w-full pl-9 pr-4 py-3 text-sm bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all shadow-sm text-slate-900" />
                     </div>
                   </div>
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between mb-1">
                       <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider ml-1">Kata Sandi</label>
-                      <span className="text-[10px] text-slate-400 italic">(Kosongkan jika tidak diganti)</span>
+                      <span className="text-[10px] text-slate-400 italic"></span>
                     </div>
                     <div className="relative">
                       <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -812,7 +814,7 @@ export default function Profile() {
                         value={editForm.password} 
                         onChange={e => setEditForm({...editForm, password: e.target.value})} 
                         placeholder="Masukkan kata sandi baru..." 
-                        className="w-full pl-9 pr-10 py-3 text-sm bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all shadow-sm font-mono" 
+                        className="w-full pl-9 pr-10 py-3 text-sm bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all shadow-sm font-mono text-slate-900" 
                       />
                       <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-blue-600 transition-colors">
                         {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -827,25 +829,25 @@ export default function Profile() {
                   </h4>
                   <div className="space-y-1.5">
                     <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider ml-1">Nama Lengkap</label>
-                    <input required value={editForm.full_name} onChange={e => setEditForm({...editForm, full_name: e.target.value})} className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all shadow-sm font-medium" />
+                    <input required value={editForm.full_name} onChange={e => setEditForm({...editForm, full_name: e.target.value})} className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all shadow-sm font-medium text-slate-900" />
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider ml-1">Orang Tua / Wali</label>
-                      <input required value={editForm.parent_name} onChange={e => setEditForm({...editForm, parent_name: e.target.value})} className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all shadow-sm font-medium" />
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider ml-1">Orang Tua </label>
+                      <input required value={editForm.parent_name} onChange={e => setEditForm({...editForm, parent_name: e.target.value})} className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all shadow-sm font-medium text-slate-900" />
                     </div>
                     <div className="space-y-1.5">
                       <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider ml-1">Usia (Tahun)</label>
-                      <input type="number" required value={editForm.age} onChange={e => setEditForm({...editForm, age: e.target.value})} className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all shadow-sm font-medium" />
+                      <input type="number" required value={editForm.age} onChange={e => setEditForm({...editForm, age: e.target.value})} className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all shadow-sm font-medium text-slate-900" />
                     </div>
                   </div>
                   <div className="space-y-1.5">
                     <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider ml-1">Nomor Telepon</label>
-                    <input required placeholder="+62..." value={editForm.phone_number} onChange={e => setEditForm({...editForm, phone_number: e.target.value})} className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all shadow-sm font-medium" />
+                    <input required placeholder="+62..." value={editForm.phone_number} onChange={e => setEditForm({...editForm, phone_number: e.target.value})} className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all shadow-sm font-medium text-slate-900" />
                   </div>
                   <div className="space-y-1.5">
                     <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider ml-1">Alamat Lengkap</label>
-                    <textarea required rows="3" value={editForm.address} onChange={e => setEditForm({...editForm, address: e.target.value})} className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all shadow-sm resize-none font-medium"></textarea>
+                    <textarea required rows="3" value={editForm.address} onChange={e => setEditForm({...editForm, address: e.target.value})} className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all shadow-sm resize-none font-medium text-slate-900"></textarea>
                   </div>
                 </div>
               </form>

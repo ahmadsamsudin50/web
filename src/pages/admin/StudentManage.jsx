@@ -23,6 +23,10 @@ import {
   Clock,
   Award,
   Camera,
+  History,
+  ZoomIn,
+  Calendar,
+  Loader2,
 } from "lucide-react";
 
 // Helper: Kompresi gambar client-side menggunakan HTML5 Canvas
@@ -138,6 +142,12 @@ export default function StudentManage() {
   const [selectedUserId, setSelectedUserId] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
 
+  // State Modal Pop-up Riwayat & Zoom
+  const [selectedStudentHistory, setSelectedStudentHistory] = useState(null);
+  const [attendanceLogsDetail, setAttendanceLogsDetail] = useState({});
+  const [loadingLogs, setLoadingLogs] = useState(false);
+  const [selectedImageZoom, setSelectedImageZoom] = useState(null);
+
   // State Foto Profil
   const [photoFile, setPhotoFile] = useState(null);
   const [photoPreview, setPhotoPreview] = useState(null);
@@ -211,7 +221,7 @@ export default function StudentManage() {
           .select(`
             *,
             users ( id, full_name, email, password, status ),
-            student_enrollments ( id, class_id, status, completed_at, classes ( name, category, max_sessions ) )
+            student_enrollments ( id, class_id, status, start_date, created_at, completed_at, classes ( name, category, max_sessions ) )
           `)
           .order("created_at", { ascending: false }),
         supabase
@@ -225,7 +235,7 @@ export default function StudentManage() {
 
       setClasses(Array.isArray(clsRes.data) ? clsRes.data : []);
 
-      // Hitung total sesi kehadiran valid per enrollment_id (termasuk alpa)
+      // Hitung total sesi kehadiran valid per enrollment_id
       const attendanceCountMap = {};
       if (Array.isArray(logsRes.data)) {
         logsRes.data.forEach((log) => {
@@ -268,6 +278,50 @@ export default function StudentManage() {
   useEffect(() => {
     fetchData();
   }, []);
+
+  // Fungsi mengurutkan dan mengambil detail riwayat presensi yang sudah ter-index
+  const handleOpenHistoryModal = async (student) => {
+    setSelectedStudentHistory(student);
+    setLoadingLogs(true);
+    setAttendanceLogsDetail({});
+
+    try {
+      if (student.id) {
+        // Berkat CREATE INDEX idx_attendance_logs_student_id, query ini sangat cepat
+        const { data: logs, error } = await supabase
+          .from("attendance_logs")
+          .select(`
+            id,
+            status,
+            scanned_at,
+            enrollment_id,
+            sessions ( name, session_date )
+          `)
+          .eq("student_id", student.id)
+          .order("scanned_at", { ascending: false });
+
+        if (error) throw error;
+
+        // Kelompokkan log kehadiran berdasarkan enrollment_id
+        const grouped = {};
+        if (Array.isArray(logs)) {
+          logs.forEach((log) => {
+            if (log.enrollment_id) {
+              if (!grouped[log.enrollment_id]) {
+                grouped[log.enrollment_id] = [];
+              }
+              grouped[log.enrollment_id].push(log);
+            }
+          });
+        }
+        setAttendanceLogsDetail(grouped);
+      }
+    } catch (err) {
+      toast.error("Gagal memuat detail sesi: " + err.message);
+    } finally {
+      setLoadingLogs(false);
+    }
+  };
 
   const handlePhotoSelect = async (e) => {
     const file = e.target.files?.[0];
@@ -537,40 +591,18 @@ export default function StudentManage() {
         closeConfirm();
         const loadingToast = toast.loading("Menghapus seluruh rekaman...");
         try {
-          // 1. Hapus riwayat presensi
           if (s.id) {
-            await supabase
-              .from("attendance_logs")
-              .delete()
-              .eq("student_id", s.id);
+            await supabase.from("attendance_logs").delete().eq("student_id", s.id);
+            await supabase.from("student_enrollments").delete().eq("student_id", s.id);
+            await supabase.from("payments").delete().eq("student_id", s.id);
 
-            // 2. Hapus pendaftaran kelas
-            await supabase
-              .from("student_enrollments")
-              .delete()
-              .eq("student_id", s.id);
-
-            // 3. Hapus transaksi pembayaran
-            await supabase
-              .from("payments")
-              .delete()
-              .eq("student_id", s.id);
-
-            // 4. Hapus data profil atlet di tabel students
-            const { error: studentErr } = await supabase
-              .from("students")
-              .delete()
-              .eq("id", s.id);
+            const { error: studentErr } = await supabase.from("students").delete().eq("id", s.id);
             if (studentErr) throw studentErr;
           }
 
-          // 5. Hapus akun pengguna di tabel users
           const targetUserId = s.user_id || s.users?.id;
           if (targetUserId) {
-            const { error: userErr } = await supabase
-              .from("users")
-              .delete()
-              .eq("id", targetUserId);
+            const { error: userErr } = await supabase.from("users").delete().eq("id", targetUserId);
             if (userErr) throw userErr;
           }
 
@@ -636,8 +668,38 @@ export default function StudentManage() {
     rejected: Array.isArray(students) ? students.filter((s) => s.users?.status === "rejected").length : 0,
   };
 
+  const renderAttendanceBadge = (status) => {
+    switch (status) {
+      case "hadir_qr":
+        return <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 font-bold text-[10px]">Hadir (QR)</span>;
+      case "hadir_manual":
+        return <span className="px-2 py-0.5 rounded-md bg-blue-100 text-blue-800 font-bold text-[10px]">Hadir (Manual)</span>;
+      case "izin":
+        return <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 font-bold text-[10px]">Izin</span>;
+      case "sakit":
+        return <span className="px-2 py-0.5 rounded-md bg-purple-100 text-purple-800 font-bold text-[10px]">Sakit</span>;
+      case "alpa":
+        return <span className="px-2 py-0.5 rounded-md bg-rose-100 text-rose-800 font-bold text-[10px]">Alpa</span>;
+      default:
+        return <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-bold text-[10px]">{status}</span>;
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#f8fafc] p-4 md:p-8 font-sans">
+      {/* CSS untuk Menyembunyikan Seluruh Scrollbar Tanpa Menghilangkan Fungsi Scroll */}
+      <style>{`
+        ::-webkit-scrollbar {
+          display: none !important;
+          width: 0px !important;
+          height: 0px !important;
+        }
+        * {
+          -ms-overflow-style: none !important;
+          scrollbar-width: none !important;
+        }
+      `}</style>
+
       <Toaster position="top-right" />
 
       <CustomConfirmModal
@@ -744,7 +806,7 @@ export default function StudentManage() {
           <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
-            placeholder="Cari atlet berdasarkan nama, NIS, orang tua/wali, atau telepon..."
+            placeholder="Cari atlet berdasarkan nama, NIS, orang tua, atau telepon..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm outline-none focus:ring-2 focus:ring-blue-500 font-medium"
@@ -777,7 +839,7 @@ export default function StudentManage() {
 
       {/* Tabel Data Atlet */}
       <div className="max-w-7xl mx-auto bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-        {/* Tampilan Desktop & Tablet: Disembunyikan pada layar mobile dengan hidden md:block */}
+        {/* Tampilan Desktop & Tablet */}
         <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[980px]">
             <thead>
@@ -798,9 +860,27 @@ export default function StudentManage() {
                   </td>
                   <td className="px-5 py-4">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-blue-50 border border-slate-200 flex items-center justify-center font-bold text-xs shrink-0 overflow-hidden">
+                      <div
+                        onClick={() => {
+                          if (s.avatar_url) {
+                            setSelectedImageZoom({
+                              url: s.avatar_url,
+                              name: s.users?.full_name || "Atlet",
+                            });
+                          }
+                        }}
+                        className={`w-10 h-10 rounded-xl bg-blue-50 border border-slate-200 flex items-center justify-center font-bold text-xs shrink-0 overflow-hidden relative group ${
+                          s.avatar_url ? "cursor-pointer" : ""
+                        }`}
+                        title={s.avatar_url ? "Klik untuk zoom foto" : ""}
+                      >
                         {s.avatar_url ? (
-                          <img src={s.avatar_url} alt="" className="w-full h-full object-cover" />
+                          <>
+                            <img src={s.avatar_url} alt="" className="w-full h-full object-cover" />
+                            <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white">
+                              <ZoomIn size={14} />
+                            </div>
+                          </>
                         ) : (
                           <User size={18} className="text-blue-600" />
                         )}
@@ -817,7 +897,11 @@ export default function StudentManage() {
 
                   {/* Status Kelas */}
                   <td className="px-5 py-4 min-w-[240px]">
-                    <div className="flex flex-col gap-1.5 w-full">
+                    <div
+                      onClick={() => handleOpenHistoryModal(s)}
+                      className="flex flex-col gap-1.5 w-full cursor-pointer group/item p-1.5 rounded-xl hover:bg-slate-100/70 transition-colors"
+                      title="Klik untuk melihat riwayat lengkap semua kelas & detail pertemuan"
+                    >
                       {s.enrollments && s.enrollments.length > 0 ? (
                         s.enrollments.map((enr, i) => {
                           const isCompleted = enr.status === "completed";
@@ -863,6 +947,9 @@ export default function StudentManage() {
                       ) : (
                         <span className="text-[11px] text-slate-400 italic">Belum ada kelas</span>
                       )}
+                      <div className="text-[10px] text-blue-600 font-bold opacity-0 group-hover/item:opacity-100 transition-opacity flex items-center gap-1 mt-0.5">
+                        <History size={11} /> Lihat Detail
+                      </div>
                     </div>
                   </td>
 
@@ -937,7 +1024,7 @@ export default function StudentManage() {
           </table>
         </div>
 
-        {/* Tampilan Mobile: Hanya muncul di layar kecil (md:hidden) */}
+        {/* Tampilan Mobile */}
         <div className="md:hidden divide-y divide-slate-100 p-3 space-y-3">
           {processedStudents.map((s, index) => (
             <div key={s.id} className="pt-3 first:pt-0 space-y-2.5">
@@ -947,7 +1034,19 @@ export default function StudentManage() {
                     {index + 1}
                   </span>
                   <div className="flex items-center gap-2.5">
-                    <div className="w-10 h-10 rounded-xl bg-blue-50 border border-slate-200 flex items-center justify-center font-bold text-xs shrink-0 overflow-hidden">
+                    <div
+                      onClick={() => {
+                        if (s.avatar_url) {
+                          setSelectedImageZoom({
+                            url: s.avatar_url,
+                            name: s.users?.full_name || "Atlet",
+                          });
+                        }
+                      }}
+                      className={`w-10 h-10 rounded-xl bg-blue-50 border border-slate-200 flex items-center justify-center font-bold text-xs shrink-0 overflow-hidden relative group ${
+                        s.avatar_url ? "cursor-pointer" : ""
+                      }`}
+                    >
                       {s.avatar_url ? (
                         <img src={s.avatar_url} alt="" className="w-full h-full object-cover" />
                       ) : (
@@ -1002,6 +1101,33 @@ export default function StudentManage() {
                 </div>
               </div>
 
+              {/* Status Kelas versi Mobile */}
+              <div
+                onClick={() => handleOpenHistoryModal(s)}
+                className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 cursor-pointer space-y-1"
+              >
+                <div className="text-[10px] font-bold text-slate-400 uppercase flex items-center justify-between">
+                  <span>Status Kelas & Pertemuan</span>
+                  <span className="text-blue-600 flex items-center gap-0.5">
+                    <History size={10} /> Riwayat
+                  </span>
+                </div>
+                {s.enrollments && s.enrollments.length > 0 ? (
+                  s.enrollments.slice(0, 2).map((enr, i) => (
+                    <div key={i} className="flex items-center justify-between text-xs font-semibold text-slate-700">
+                      <span className="truncate">{enr.classes?.name || "Kelas Latihan"}</span>
+                      <span className="text-[10px] font-mono text-slate-500">
+                        {enr.status === "completed"
+                          ? "Selesai"
+                          : `${enr.attendanceCount || 0}/${enr.classes?.max_sessions || 12} Pertemuan`}
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-xs text-slate-400 italic">Belum ada kelas</div>
+                )}
+              </div>
+
               <div className="text-[11px] text-slate-500 pl-8 space-y-1">
                 <div>Orang Tua: <span className="font-semibold text-slate-700">{s.parent_name || "-"}</span></div>
                 <div>Kontak: <span className="font-semibold text-slate-700">{s.phone_number || "-"}</span></div>
@@ -1016,6 +1142,169 @@ export default function StudentManage() {
           )}
         </div>
       </div>
+
+      {/* Pop-up Modal Riwayat Semua Kelas & Detail Sesi/Pertemuan */}
+      {selectedStudentHistory && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-xl overflow-hidden p-6 space-y-4 animate-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                  <History size={18} className="text-blue-600" />
+                  Riwayat Kelas & Presensi Sesi
+                </h3>
+                <p className="text-xs text-slate-400">
+                  {selectedStudentHistory.users?.full_name} (NIS: {selectedStudentHistory.nis})
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedStudentHistory(null)}
+                className="p-1 rounded-full text-slate-400 hover:bg-slate-100 transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="max-h-[65vh] overflow-y-auto space-y-4 pr-1">
+              {loadingLogs ? (
+                <div className="py-12 flex flex-col items-center justify-center text-slate-400 gap-2">
+                  <Loader2 size={24} className="animate-spin text-blue-600" />
+                  <span className="text-xs font-medium">Memuat detail riwayat pertemuan...</span>
+                </div>
+              ) : selectedStudentHistory.enrollments && selectedStudentHistory.enrollments.length > 0 ? (
+                selectedStudentHistory.enrollments.map((enr, i) => {
+                  const statusMap = {
+                    active: { label: "Aktif ", bg: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+                    completed: { label: "Selesai", bg: "bg-slate-100 text-slate-600 border-slate-200" },
+                    dropped: { label: "Dibatalkan", bg: "bg-rose-50 text-rose-700 border-rose-200" },
+                  };
+                  const currentStatus = statusMap[enr.status] || statusMap.active;
+                  const logs = attendanceLogsDetail[enr.id] || [];
+
+                  return (
+                    <div
+                      key={i}
+                      className="p-4 bg-slate-50/70 rounded-2xl border border-slate-200/80 space-y-3"
+                    >
+                      <div className="flex items-start justify-between gap-2 border-b border-slate-200/60 pb-2">
+                        <div>
+                          <div className="font-bold text-slate-800 text-sm">
+                            {enr.classes?.name || "Kelas Latihan"}
+                          </div>
+                          <div className="text-[10px] text-slate-400 uppercase font-bold mt-0.5">
+                            Kategori: {enr.classes?.category || "Umum"}
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-end gap-1">
+                          <span
+                            className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${currentStatus.bg}`}
+                          >
+                            {currentStatus.label}
+                          </span>
+                          <span className="text-[10px] font-mono text-slate-500 font-semibold">
+                            {enr.attendanceCount || 0} / {enr.classes?.max_sessions || 12} Pertemuan
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Detail Daftar Pertemuan/Sesi */}
+                      <div className="space-y-2">
+                        <div className="text-[11px] font-bold text-slate-600 flex items-center gap-1">
+                          <Calendar size={13} className="text-blue-600" />
+                          Rincian Sesi & Kehadiran:
+                        </div>
+
+                        {logs.length > 0 ? (
+                          <div className="divide-y divide-slate-100 bg-white rounded-xl border border-slate-200/60 overflow-hidden">
+                            {logs.map((log, idx) => {
+                              const sessionDate = log.sessions?.session_date || log.scanned_at;
+                              const formattedDate = sessionDate
+                                ? new Date(sessionDate).toLocaleDateString("id-ID", {
+                                    weekday: "short",
+                                    day: "numeric",
+                                    month: "short",
+                                    year: "numeric",
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  })
+                                : "-";
+
+                              return (
+                                <div
+                                  key={log.id || idx}
+                                  className="p-2.5 flex items-center justify-between text-xs hover:bg-slate-50/50"
+                                >
+                                  <div>
+                                    <div className="font-semibold text-slate-800 text-[11px]">
+                                      {log.sessions?.name || `Sesi Pertemuan`}
+                                    </div>
+                                    <div className="text-[10px] text-slate-400 font-mono mt-0.5">
+                                      {formattedDate}
+                                    </div>
+                                  </div>
+                                  <div>{renderAttendanceBadge(log.status)}</div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <div className="p-3 text-center bg-white rounded-xl border border-slate-100 text-slate-400 text-[11px] italic">
+                            Belum ada catatan presensi sesi untuk kelas ini.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="py-8 text-center text-slate-400 text-xs italic">
+                  Siswa ini belum pernah terdaftar di kelas manapun.
+                </div>
+              )}
+            </div>
+
+            <div className="pt-2 border-t border-slate-100 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setSelectedStudentHistory(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-all"
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Pop-up Modal Zoom Foto Profil Student */}
+      {selectedImageZoom && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200"
+          onClick={() => setSelectedImageZoom(null)}
+        >
+          <div
+            className="relative max-w-lg w-full bg-transparent p-2 text-center flex flex-col items-center animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => setSelectedImageZoom(null)}
+              className="absolute -top-10 right-0 p-2 text-white/80 hover:text-white bg-black/40 hover:bg-black/60 rounded-full transition-colors"
+            >
+              <X size={20} />
+            </button>
+            <img
+              src={selectedImageZoom.url}
+              alt={selectedImageZoom.name}
+              className="max-h-[80vh] w-auto max-w-full rounded-2xl shadow-2xl object-contain border-2 border-white/20"
+            />
+            <div className="mt-3 text-white font-bold text-sm bg-black/60 px-4 py-1.5 rounded-full border border-white/10">
+              {selectedImageZoom.name}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal Tambah/Edit Profil Atlet */}
       {isFormModalOpen && (
@@ -1116,7 +1405,7 @@ export default function StudentManage() {
                         Kata Sandi
                       </label>
                       <span className="text-[10px] text-slate-400 italic">
-                        {isEditing ? "(Kata sandi akun saat ini)" : "(Minimal 6 karakter)"}
+                        {isEditing ? " " : "(Minimal 6 karakter)"}
                       </span>
                     </div>
                     <div className="relative">
@@ -1175,7 +1464,7 @@ export default function StudentManage() {
                   </div>
                   <div>
                     <label className="block font-bold text-slate-600 uppercase text-[10px] mb-1">
-                      Nama Orang Tua / Wali
+                      Nama Orang Tua
                     </label>
                     <input
                       required

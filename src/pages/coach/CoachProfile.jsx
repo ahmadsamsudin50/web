@@ -103,7 +103,7 @@ export default function CoachProfile() {
     photo_url: '', achievements: ['']
   });
 
-  // Helper pembersihan berkas foto lama di Supabase Storage (P4)
+  // Helper pembersihan berkas foto lama di Supabase Storage
   const extractStoragePath = (publicUrl) => {
     if (!publicUrl) return null;
     try {
@@ -276,7 +276,7 @@ export default function CoachProfile() {
       const user = JSON.parse(localStorage.getItem("user_session") || "{}");
       const cleanEmail = editForm.email.trim().toLowerCase();
 
-      // P3: Validasi apakah email diubah dan sudah terpakai oleh user lain
+      // Validasi email jika diubah
       if (cleanEmail !== user.email?.toLowerCase()) {
         const { data: existingUser } = await supabase
           .from("users")
@@ -320,7 +320,7 @@ export default function CoachProfile() {
 
       if (coachError) throw coachError;
 
-      // P4: Hapus foto lama di storage jika berkas baru berhasil diperbarui
+      // Hapus foto lama di storage hanya jika update database sukses dan foto berubah/diganti
       if (initialPhotoUrl && finalPhotoUrl !== initialPhotoUrl) {
         await deleteCoachPhotoIfOrphan(initialPhotoUrl, coachData.id);
       }
@@ -333,7 +333,7 @@ export default function CoachProfile() {
       user.email = cleanEmail;
       localStorage.setItem("user_session", JSON.stringify(user));
     } catch (error) {
-      // Rollback jika foto sempat terunggah tetapi update database gagal
+      // Rollback: Hapus file baru di storage jika update database gagal
       if (newlyUploadedPath) {
         await supabase.storage.from('images').remove([newlyUploadedPath]);
       }
@@ -346,6 +346,25 @@ export default function CoachProfile() {
   if (loading) {
     return (
       <div className="min-h-[70vh] flex flex-col items-center justify-center font-sans">
+        <style>{`
+          html, body, #root {
+            overflow-x: hidden !important;
+          }
+
+          html, body, #root, * {
+            -ms-overflow-style: none !important;
+            scrollbar-width: none !important;
+          }
+
+          html::-webkit-scrollbar,
+          body::-webkit-scrollbar,
+          #root::-webkit-scrollbar,
+          *::-webkit-scrollbar {
+            display: none !important;
+            width: 0px !important;
+            height: 0px !important;
+          }
+        `}</style>
         <div className="w-10 h-10 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-3"></div>
         <p className="text-slate-500 text-sm font-medium animate-pulse">Memuat kartu instruktur...</p>
       </div>
@@ -354,6 +373,25 @@ export default function CoachProfile() {
 
   return (
     <div className="py-6 flex flex-col items-center pb-24 lg:pb-6 font-sans relative px-4">
+      <style>{`
+        html, body, #root {
+          overflow-x: hidden !important;
+        }
+
+        html, body, #root, * {
+          -ms-overflow-style: none !important;
+          scrollbar-width: none !important;
+        }
+
+        html::-webkit-scrollbar,
+        body::-webkit-scrollbar,
+        #root::-webkit-scrollbar,
+        *::-webkit-scrollbar {
+          display: none !important;
+          width: 0px !important;
+          height: 0px !important;
+        }
+      `}</style>
       <Toaster position="top-center" />
 
       {/* Papan Pengumuman Klub */}

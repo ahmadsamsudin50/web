@@ -48,6 +48,7 @@ export default function History() {
             cMap[c.id] = c.users?.full_name;
           });
         }
+
         setCoachesMap(cMap);
 
         const { data: attendanceLogs, error } = await supabase
@@ -125,7 +126,6 @@ export default function History() {
     return status ? status.replace("_", " ") : "-";
   };
 
-  // Ringkasan status terhitung vs status bebas kuota
   const countedSessions = logs.filter((l) =>
     ["hadir_qr", "hadir_manual", "alpa"].includes(l.status?.toLowerCase())
   ).length;
@@ -133,7 +133,21 @@ export default function History() {
   if (loading) {
     return (
       <div className="min-h-[70vh] flex flex-col items-center justify-center">
+        <style>{`
+          ::-webkit-scrollbar {
+            display: none !important;
+            width: 0px !important;
+            height: 0px !important;
+          }
+
+          * {
+            -ms-overflow-style: none !important;
+            scrollbar-width: none !important;
+          }
+        `}</style>
+
         <div className="w-12 h-12 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-4"></div>
+
         <p className="text-slate-500 font-medium animate-pulse">
           Memuat riwayat Anda...
         </p>
@@ -143,22 +157,45 @@ export default function History() {
 
   return (
     <div className="py-6 font-sans max-w-7xl mx-auto w-full px-2 sm:px-4">
+      {/* CSS Global untuk Menyembunyikan Seluruh Scrollbar Tanpa Menghilangkan Fungsi Scroll */}
+      <style>{`
+        /* Chrome, Edge, Safari */
+        ::-webkit-scrollbar {
+          display: none !important;
+          width: 0px !important;
+          height: 0px !important;
+        }
+
+        /* Firefox, IE, Edge */
+        * {
+          -ms-overflow-style: none !important;
+          scrollbar-width: none !important;
+        }
+      `}</style>
+
       <div className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight flex items-center gap-3">
             <ClipboardList className="text-blue-600" size={32} />
             Riwayat Kehadiran
           </h1>
+
           <p className="text-slate-500 mt-1 text-sm">
             Lacak catatan latihan renang dan ringkasan kehadiran Anda.
           </p>
         </div>
+
         <div className="flex flex-wrap items-center gap-2">
           <div className="bg-slate-100 text-slate-700 px-4 py-2.5 rounded-2xl text-xs font-bold border border-slate-200 shadow-sm">
-            Total Sesi Terhitung: <span className="text-blue-700 font-black">{countedSessions}</span>
+            Total Sesi Terhitung:{" "}
+            <span className="text-blue-700 font-black">{countedSessions}</span>
           </div>
+
           <div className="bg-blue-50 text-blue-700 px-4 py-2.5 rounded-2xl text-xs font-bold border border-blue-100 shadow-sm">
-            Total Rekaman: <span className="text-blue-900 font-black">{processedLogs.length}</span>
+            Total Rekaman:{" "}
+            <span className="text-blue-900 font-black">
+              {processedLogs.length}
+            </span>
           </div>
         </div>
       </div>
@@ -168,6 +205,7 @@ export default function History() {
           <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
             <Search size={18} className="text-slate-400" />
           </div>
+
           <input
             type="text"
             placeholder="Cari nama sesi atau kelas..."
@@ -181,6 +219,7 @@ export default function History() {
           <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
             <Filter size={18} className="text-slate-400" />
           </div>
+
           <select
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value)}
@@ -207,6 +246,7 @@ export default function History() {
               sortOrder === "desc" ? "text-blue-600" : "text-slate-400"
             }
           />
+
           {sortOrder === "desc" ? "Terbaru" : "Terlama"}
         </button>
       </div>
@@ -222,36 +262,48 @@ export default function History() {
                 <th className="px-6 py-4 text-right">Status</th>
               </tr>
             </thead>
+
             <tbody className="divide-y divide-slate-50">
               {paginatedLogs.map((log) => {
                 const scanDateObj = new Date(log.scanned_at);
+
                 const dateStr = scanDateObj.toLocaleDateString("id-ID", {
                   day: "numeric",
                   month: "long",
                   year: "numeric",
                 });
+
                 const timeStr = scanDateObj.toLocaleTimeString("id-ID", {
                   hour: "2-digit",
                   minute: "2-digit",
                 });
 
                 const sessionDateObj = new Date(log.sessions?.session_date);
-                const sessionDateStr = sessionDateObj.toLocaleDateString("id-ID", {
-                  day: "numeric",
-                  month: "short",
-                  year: "numeric",
-                });
-                const sessionTimeStr = sessionDateObj.toLocaleTimeString("id-ID", {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                });
+
+                const sessionDateStr = sessionDateObj.toLocaleDateString(
+                  "id-ID",
+                  {
+                    day: "numeric",
+                    month: "short",
+                    year: "numeric",
+                  }
+                );
+
+                const sessionTimeStr = sessionDateObj.toLocaleTimeString(
+                  "id-ID",
+                  {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  }
+                );
 
                 const assignedCoaches =
                   log.sessions?.coach_ids?.map(
                     (id) => coachesMap[id] || "Instruktur Tidak Dikenal",
                   ) || [];
 
-                const dynamicClassName = log.student_enrollments?.classes?.name || "Kelas Umum";
+                const dynamicClassName =
+                  log.student_enrollments?.classes?.name || "Kelas Umum";
 
                 return (
                   <tr
@@ -261,27 +313,35 @@ export default function History() {
                     <td className="px-6 py-4">
                       <div className="flex flex-col">
                         <div className="font-bold text-slate-700 text-sm flex items-center gap-1.5">
-                          <CalendarDays size={14} className="text-blue-500" />
+                          <CalendarDays
+                            size={14}
+                            className="text-blue-500"
+                          />
                           {dateStr}
                         </div>
+
                         <div className="text-xs text-slate-400 mt-1 flex items-center gap-1.5">
                           <Clock size={14} />
                           {timeStr} WIB
                         </div>
                       </div>
                     </td>
+
                     <td className="px-6 py-4">
                       <div className="font-semibold text-slate-800 text-base">
                         {log.sessions?.name || "Sesi Tidak Dikenal"}
                       </div>
+
                       <div className="text-xs text-slate-500 mt-0.5">
                         Jadwal: {sessionDateStr} • {sessionTimeStr} WIB
                       </div>
                     </td>
+
                     <td className="px-6 py-4">
                       <div className="font-bold text-blue-600 text-sm">
                         {dynamicClassName}
                       </div>
+
                       <div className="text-xs text-slate-500 mt-0.5">
                         <span className="font-medium">Pelatih:</span>{" "}
                         {assignedCoaches.length > 0
@@ -289,6 +349,7 @@ export default function History() {
                           : "Belum ditentukan"}
                       </div>
                     </td>
+
                     <td className="px-6 py-4 text-right">
                       <span
                         className={`inline-block px-3 py-1.5 rounded-lg border text-[10px] font-black uppercase tracking-wider ${getStatusBadgeStyle(log.status)}`}
@@ -306,11 +367,13 @@ export default function History() {
         <div className="md:hidden divide-y divide-slate-100 p-4 space-y-3">
           {paginatedLogs.map((log) => {
             const scanDateObj = new Date(log.scanned_at);
+
             const dateStr = scanDateObj.toLocaleDateString("id-ID", {
               day: "numeric",
               month: "short",
               year: "numeric",
             });
+
             const timeStr = scanDateObj.toLocaleTimeString("id-ID", {
               hour: "2-digit",
               minute: "2-digit",
@@ -325,18 +388,31 @@ export default function History() {
               <div key={log.id} className="pt-3 first:pt-0 space-y-2">
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <h3 className="font-bold text-slate-800 text-sm">{log.sessions?.name || "Sesi Latihan"}</h3>
+                    <h3 className="font-bold text-slate-800 text-sm">
+                      {log.sessions?.name || "Sesi Latihan"}
+                    </h3>
+
                     <p className="text-xs text-blue-600 font-semibold mt-0.5">
                       {log.student_enrollments?.classes?.name || "Kelas Umum"}
                     </p>
                   </div>
-                  <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border shrink-0 ${getStatusBadgeStyle(log.status)}`}>
+
+                  <span
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border shrink-0 ${getStatusBadgeStyle(log.status)}`}
+                  >
                     {getStatusLabel(log.status)}
                   </span>
                 </div>
+
                 <div className="flex items-center justify-between text-[11px] text-slate-400">
-                  <span>Pelatih: {assignedCoaches.join(", ") || "Belum ditentukan"}</span>
-                  <span>{dateStr} • {timeStr} WIB</span>
+                  <span>
+                    Pelatih:{" "}
+                    {assignedCoaches.join(", ") || "Belum ditentukan"}
+                  </span>
+
+                  <span>
+                    {dateStr} • {timeStr} WIB
+                  </span>
                 </div>
               </div>
             );
@@ -348,9 +424,11 @@ export default function History() {
             <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
               <Search size={32} className="text-slate-300" />
             </div>
+
             <p className="font-bold text-slate-600 text-lg">
               Tidak ada catatan ditemukan
             </p>
+
             <p className="text-sm mt-1">
               Coba sesuaikan kata kunci pencarian atau opsi filter Anda.
             </p>
@@ -361,9 +439,11 @@ export default function History() {
           <div className="p-4 border-t border-slate-50 flex items-center justify-between bg-slate-50/50">
             <span className="text-xs font-medium text-slate-500 pl-2">
               Halaman{" "}
-              <span className="font-bold text-slate-800">{currentPage}</span> dari{" "}
+              <span className="font-bold text-slate-800">{currentPage}</span>{" "}
+              dari{" "}
               <span className="font-bold text-slate-800">{totalPages}</span>
             </span>
+
             <div className="flex gap-2">
               <button
                 onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
@@ -372,6 +452,7 @@ export default function History() {
               >
                 <ChevronLeft size={18} />
               </button>
+
               <button
                 onClick={() =>
                   setCurrentPage((p) => Math.min(totalPages, p + 1))

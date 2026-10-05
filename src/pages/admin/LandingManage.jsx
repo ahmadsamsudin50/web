@@ -679,12 +679,25 @@ export default function LandingManage() {
   const TABS = [
     { id: "hero", label: "Bagian Utama (Hero)", icon: Type },
     { id: "info", label: "Informasi & Galeri", icon: ImageIcon },
-    { id: "courses", label: "Paket Program (Tabel Kelas)", icon: Layers },
-    { id: "testimonials", label: "Ulasan / Testimoni", icon: Star },
+    { id: "courses", label: "Paket Program ", icon: Layers },
+    { id: "testimonials", label: "Ulasan", icon: Star },
   ];
 
   return (
     <div className="min-h-screen bg-[#f8fafc] font-sans text-slate-900">
+      {/* CSS untuk Menyembunyikan Seluruh Scrollbar Tanpa Menghilangkan Fungsi Scroll */}
+      <style>{`
+        ::-webkit-scrollbar {
+          display: none !important;
+          width: 0px !important;
+          height: 0px !important;
+        }
+        * {
+          -ms-overflow-style: none !important;
+          scrollbar-width: none !important;
+        }
+      `}</style>
+
       <Toaster position="top-right" />
 
       <CustomConfirmModal

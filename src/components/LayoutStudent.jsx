@@ -1,12 +1,15 @@
 import React, { useState, useEffect } from "react";
 import { Outlet, Link, useNavigate, useLocation } from "react-router-dom";
 import { QrCode, History, LogOut, Menu, CalendarDays, CreditCard } from "lucide-react";
+import { supabase } from "../utils/supabaseClient";
 
 export default function LayoutStudent() {
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [studentName, setStudentName] = useState("Atlet");
+  const [studentPhoto, setStudentPhoto] = useState("");
+  const [studentPhotoError, setStudentPhotoError] = useState(false);
   const [imgError, setImgError] = useState(false);
 
   useEffect(() => {
@@ -16,6 +19,27 @@ export default function LayoutStudent() {
         const user = JSON.parse(savedUser);
         if (user.full_name) {
           setStudentName(user.full_name);
+        }
+
+        if (user.id) {
+          supabase
+            .from("students")
+            .select("avatar_url")
+            .eq("user_id", user.id)
+            .maybeSingle()
+            .then(({ data, error }) => {
+              if (!error && data?.avatar_url) {
+                setStudentPhoto(data.avatar_url);
+                setStudentPhotoError(false);
+              } else {
+                setStudentPhoto("");
+                setStudentPhotoError(false);
+              }
+            })
+            .catch(() => {
+              setStudentPhoto("");
+              setStudentPhotoError(false);
+            });
         }
       } catch (_) {}
     }
@@ -186,8 +210,19 @@ export default function LayoutStudent() {
               </p>
               <p className="text-[11px] text-blue-600 font-semibold mt-0.5">Atlet Siripbiru</p>
             </div>
-            <div className="w-10 h-10 rounded-2xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 font-black text-xs shadow-sm">
-              {studentName?.[0]?.toUpperCase() || "A"}
+            <div className="w-10 h-10 rounded-2xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 font-black text-xs shadow-sm overflow-hidden">
+              {!studentPhoto || studentPhotoError ? (
+                <span className="w-full h-full flex items-center justify-center bg-blue-50 text-blue-600">
+                  {studentName?.[0]?.toUpperCase() || "A"}
+                </span>
+              ) : (
+                <img
+                  src={studentPhoto}
+                  alt={studentName}
+                  className="w-full h-full object-cover"
+                  onError={() => setStudentPhotoError(true)}
+                />
+              )}
             </div>
           </div>
         </header>

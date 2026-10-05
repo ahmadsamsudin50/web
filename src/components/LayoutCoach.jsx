@@ -7,12 +7,15 @@ import {
   Menu,
   ClipboardList,
 } from "lucide-react";
+import { supabase } from "../utils/supabaseClient";
 
 export default function LayoutCoach() {
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [coachName, setCoachName] = useState("Pelatih");
+  const [coachPhoto, setCoachPhoto] = useState("");
+  const [coachPhotoError, setCoachPhotoError] = useState(false);
   const [imgError, setImgError] = useState(false);
 
   useEffect(() => {
@@ -22,6 +25,27 @@ export default function LayoutCoach() {
         const user = JSON.parse(savedUser);
         if (user.full_name) {
           setCoachName(user.full_name);
+        }
+
+        if (user.id) {
+          supabase
+            .from("coaches")
+            .select("photo_url")
+            .eq("user_id", user.id)
+            .maybeSingle()
+            .then(({ data, error }) => {
+              if (!error && data?.photo_url) {
+                setCoachPhoto(data.photo_url);
+                setCoachPhotoError(false);
+              } else {
+                setCoachPhoto("");
+                setCoachPhotoError(false);
+              }
+            })
+            .catch(() => {
+              setCoachPhoto("");
+              setCoachPhotoError(false);
+            });
         }
       } catch (_) {}
     }
@@ -186,8 +210,19 @@ export default function LayoutCoach() {
               </p>
               <p className="text-[11px] text-blue-600 font-semibold mt-0.5">Instruktur Klub</p>
             </div>
-            <div className="w-10 h-10 rounded-2xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 font-black text-xs shadow-sm">
-              {coachName?.[0]?.toUpperCase() || "P"}
+            <div className="w-10 h-10 rounded-2xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 font-black text-xs shadow-sm overflow-hidden">
+              {!coachPhoto || coachPhotoError ? (
+                <span className="w-full h-full flex items-center justify-center bg-blue-50 text-blue-600">
+                  {coachName?.[0]?.toUpperCase() || "P"}
+                </span>
+              ) : (
+                <img
+                  src={coachPhoto}
+                  alt={coachName}
+                  className="w-full h-full object-cover"
+                  onError={() => setCoachPhotoError(true)}
+                />
+              )}
             </div>
           </div>
         </header>

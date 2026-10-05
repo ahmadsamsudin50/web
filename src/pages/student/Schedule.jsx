@@ -42,10 +42,10 @@ export default function Schedule() {
         if (!savedUser) throw new Error("Sesi berakhir. Silakan masuk kembali.");
         const user = JSON.parse(savedUser);
 
-        // 1. Dapatkan student_id, daftar kelas aktif, beserta tanggal dibuatnya pendaftaran (created_at)
+        // 1. Dapatkan student_id, daftar kelas aktif, beserta start_date/created_at pendaftaran
         const { data: studentData, error: studentError } = await supabase
           .from("students")
-          .select("id, student_enrollments(class_id, status, created_at, classes(name))")
+          .select("id, student_enrollments(class_id, status, start_date, created_at, classes(name))")
           .eq("user_id", user.id)
           .single();
 
@@ -56,16 +56,23 @@ export default function Schedule() {
           (e) => e.status === "active"
         ) || [];
 
-        // Petakan tanggal pendaftaran (Timestamp) dan nama kelas per class_id
-        const classEnrollmentDates = {};
+        // Petakan tanggal mulai latihan (start_date / created_at) yang dinormalisasi ke awal hari (00:00:00)
+        const classStartTimes = {};
         const cMapNames = {};
         activeEnrollments.forEach((e) => {
-          classEnrollmentDates[e.class_id] = new Date(e.created_at).getTime();
+          const rawStart = e.start_date || e.created_at;
+          if (rawStart) {
+            const startDateObj = new Date(rawStart);
+            startDateObj.setHours(0, 0, 0, 0);
+            classStartTimes[e.class_id] = startDateObj.getTime();
+          } else {
+            classStartTimes[e.class_id] = 0;
+          }
           cMapNames[e.class_id] = e.classes?.name;
         });
         setClassesMap(cMapNames);
 
-        const activeClassIds = Object.keys(classEnrollmentDates);
+        const activeClassIds = Object.keys(classStartTimes);
 
         let sessionData = [];
         if (activeClassIds.length > 0) {
@@ -76,16 +83,18 @@ export default function Schedule() {
 
           if (sessionError) throw sessionError;
 
-          // Saring sesi yang mencakup kelas aktif atlet DAN tanggal sesinya >= tanggal pendaftaran kelas
+          // Saring sesi yang mencakup kelas aktif atlet DAN tanggal sesinya >= tanggal mulai latihan
           sessionData = (allSessions || []).filter((session) => {
             if (!session.class_ids) return false;
 
-            const sessionTime = new Date(session.session_date).getTime();
+            const sessionDateObj = new Date(session.session_date);
+            sessionDateObj.setHours(0, 0, 0, 0);
+            const sessionTime = sessionDateObj.getTime();
 
             return session.class_ids.some((cId) => {
-              const enrollTime = classEnrollmentDates[cId];
-              // Hanya tampilkan jika murid sudah terdaftar sebelum/saat sesi dilaksanakan
-              return enrollTime && sessionTime >= enrollTime;
+              const startTime = classStartTimes[cId];
+              // Menggunakan start_date yang dinormalisasi sebagai acuan awal sesi
+              return startTime !== undefined && sessionTime >= startTime;
             });
           });
 
@@ -171,6 +180,17 @@ export default function Schedule() {
   if (loading) {
     return (
       <div className="min-h-[70vh] flex flex-col items-center justify-center font-sans">
+        <style>{`
+          ::-webkit-scrollbar {
+            display: none !important;
+            width: 0px !important;
+            height: 0px !important;
+          }
+          * {
+            -ms-overflow-style: none !important;
+            scrollbar-width: none !important;
+          }
+        `}</style>
         <div className="w-10 h-10 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-3"></div>
         <p className="text-slate-500 text-sm font-medium animate-pulse">Memuat jadwal latihan...</p>
       </div>
@@ -179,6 +199,19 @@ export default function Schedule() {
 
   return (
     <div className="min-h-screen bg-[#f8fafc] p-4 md:p-8 font-sans">
+      {/* CSS untuk Menyembunyikan Seluruh Scrollbar Tanpa Menghilangkan Fungsi Scroll */}
+      <style>{`
+        ::-webkit-scrollbar {
+          display: none !important;
+          width: 0px !important;
+          height: 0px !important;
+        }
+        * {
+          -ms-overflow-style: none !important;
+          scrollbar-width: none !important;
+        }
+      `}</style>
+      
       <Toaster position="top-right" />
       <div className="max-w-7xl mx-auto mb-6">
         <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight flex items-center gap-3">

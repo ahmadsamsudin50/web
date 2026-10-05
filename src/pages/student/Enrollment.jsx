@@ -289,7 +289,7 @@ export default function Enrollment() {
       const { data: urlData } = supabase.storage.from("images").getPublicUrl(uploadedReceiptPath);
       const receiptUrl = urlData.publicUrl;
 
-      // Batch insert transaksi pembayaran untuk semua kelas terpilih
+      // Batch insert transaksi pembayaran untuk semua kelas terpilih (tanpa start_date)
       const paymentBatch = selectedClasses.map((c) => ({
         student_id: studentId,
         class_id: c.id,
@@ -302,7 +302,7 @@ export default function Enrollment() {
 
       const { error: insertError } = await supabase.from("payments").insert(paymentBatch);
 
-      // Fallback jika database belum ada kolom sender_name/sender_bank
+      // Fallback jika database belum ada kolom tambahan
       if (insertError) {
         const fallbackBatch = selectedClasses.map((c) => ({
           student_id: studentId,
@@ -368,6 +368,17 @@ export default function Enrollment() {
   if (loading && payments.length === 0) {
     return (
       <div className="min-h-[70vh] flex flex-col items-center justify-center font-sans">
+        <style>{`
+          ::-webkit-scrollbar {
+            display: none !important;
+            width: 0px !important;
+            height: 0px !important;
+          }
+          * {
+            -ms-overflow-style: none !important;
+            scrollbar-width: none !important;
+          }
+        `}</style>
         <div className="w-10 h-10 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-3"></div>
         <p className="text-slate-500 text-sm font-medium animate-pulse">Memuat data pendaftaran...</p>
       </div>
@@ -376,6 +387,19 @@ export default function Enrollment() {
 
   return (
     <div className="min-h-screen bg-[#f8fafc] p-4 md:p-8 font-sans">
+      {/* CSS untuk Menyembunyikan Seluruh Scrollbar Tanpa Menghilangkan Fungsi Scroll */}
+      <style>{`
+        ::-webkit-scrollbar {
+          display: none !important;
+          width: 0px !important;
+          height: 0px !important;
+        }
+        * {
+          -ms-overflow-style: none !important;
+          scrollbar-width: none !important;
+        }
+      `}</style>
+
       <Toaster position="top-right" />
 
       <div className="max-w-7xl mx-auto mb-6">
@@ -442,73 +466,78 @@ export default function Enrollment() {
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2">
-                  Daftar Kelas Tersedia
-                </label>
-                <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                  {classes.map((c) => {
-                    const isSelected = selectedClassIds.includes(c.id);
-                    const sisa = c.remaining_seats ?? 0;
-                    const isUrgentSeat = !c.is_full && sisa <= 3;
+                <div className="mb-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">
+                    Daftar Kelas Tersedia
+                  </label>
+                </div>
+                <div className="relative">
+                  <div className="space-y-2 max-h-56 overflow-y-auto pr-1 pb-3 custom-scrollbar rounded-2xl border border-slate-200/80 bg-slate-50/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),inset_0_0_0_1px_rgba(148,163,184,0.12),inset_0_-12px_14px_rgba(255,255,255,0.8),0_1px_2px_rgba(15,23,42,0.04)]">
+                    {classes.map((c) => {
+                      const isSelected = selectedClassIds.includes(c.id);
+                      const sisa = c.remaining_seats ?? 0;
+                      const isUrgentSeat = !c.is_full && sisa <= 3;
 
-                    return (
-                      <div
-                        key={c.id}
-                        onClick={() => handleToggleClass(c)}
-                        className={`p-3 rounded-2xl border-2 transition-all cursor-pointer select-none ${
-                          c.is_full
-                            ? "opacity-50 border-slate-200 bg-slate-50 cursor-not-allowed"
-                            : isSelected
-                            ? "border-blue-600 bg-blue-50/70 ring-1 ring-blue-600"
-                            : isUrgentSeat
-                            ? "border-amber-300 bg-amber-50/40 hover:border-amber-400"
-                            : "border-slate-100 bg-slate-50/50 hover:bg-slate-50 hover:border-slate-200"
-                        }`}
-                      >
-                        <div className="flex items-start gap-2.5">
-                          <div className="mt-0.5 shrink-0">
-                            {isSelected ? (
-                              <CheckSquare size={16} className="text-blue-600" />
-                            ) : (
-                              <Square size={16} className="text-slate-400" />
-                            )}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between gap-1">
-                              <h4 className="font-bold text-slate-800 text-xs truncate">{c.name}</h4>
-                              <span className="text-[10px] font-black text-blue-700 shrink-0">
-                                {formatRupiah(c.price)}
-                              </span>
-                            </div>
-                            <div className="flex items-center justify-between text-[10px] text-slate-400 mt-1">
-                              <span className="uppercase font-semibold">{c.category || "Umum"}</span>
-
-                              {c.is_full ? (
-                                <span className="font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-md border border-rose-200">
-                                  Penuh
-                                </span>
-                              ) : isUrgentSeat ? (
-                                <span className="font-black text-amber-800 bg-amber-100/80 px-2 py-0.5 rounded-md border border-amber-300 flex items-center gap-1 shadow-2xs">
-                                  <AlertTriangle size={11} className="text-amber-600 shrink-0" />
-                                  Sisa {sisa} Kuota!
-                                </span>
+                      return (
+                        <div
+                          key={c.id}
+                          onClick={() => handleToggleClass(c)}
+                          className={`p-3 rounded-2xl border-2 transition-all cursor-pointer select-none ${
+                            c.is_full
+                              ? "opacity-50 border-slate-200 bg-slate-50 cursor-not-allowed"
+                              : isSelected
+                              ? "border-blue-600 bg-blue-50/70 ring-1 ring-blue-600"
+                              : isUrgentSeat
+                              ? "border-amber-300 bg-amber-50/40 hover:border-amber-400"
+                              : "border-slate-100 bg-slate-50/50 hover:bg-slate-50 hover:border-slate-200"
+                          }`}
+                        >
+                          <div className="flex items-start gap-2.5">
+                            <div className="mt-0.5 shrink-0">
+                              {isSelected ? (
+                                <CheckSquare size={16} className="text-blue-600" />
                               ) : (
-                                <span>Sisa {sisa} Kuota</span>
+                                <Square size={16} className="text-slate-400" />
                               )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between gap-1">
+                                <h4 className="font-bold text-slate-800 text-xs truncate">{c.name}</h4>
+                                <span className="text-[10px] font-black text-blue-700 shrink-0">
+                                  {formatRupiah(c.price)}
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between text-[10px] text-slate-400 mt-1">
+                                <span className="uppercase font-semibold">{c.category || "Umum"}</span>
+
+                                {c.is_full ? (
+                                  <span className="font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-md border border-rose-200">
+                                    Penuh
+                                  </span>
+                                ) : isUrgentSeat ? (
+                                  <span className="font-black text-amber-800 bg-amber-100/80 px-2 py-0.5 rounded-md border border-amber-300 flex items-center gap-1 shadow-2xs">
+                                    <AlertTriangle size={11} className="text-amber-600 shrink-0" />
+                                    Sisa {sisa} Kuota!
+                                  </span>
+                                ) : (
+                                  <span>Sisa {sisa} Kuota</span>
+                                )}
+                              </div>
                             </div>
                           </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
 
-                  {classes.length === 0 && (
-                    <div className="p-4 bg-amber-50 rounded-2xl border border-amber-200 text-center">
-                      <p className="text-xs text-amber-700 font-medium">
-                        Semua kelas yang tersedia saat ini sedang aktif Anda ikuti atau menunggu verifikasi.
-                      </p>
-                    </div>
-                  )}
+                    {classes.length === 0 && (
+                      <div className="p-4 bg-amber-50 rounded-2xl border border-amber-200 text-center">
+                        <p className="text-xs text-amber-700 font-medium">
+                          Semua kelas yang tersedia saat ini sedang aktif Anda ikuti atau menunggu verifikasi.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                  <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-white via-white/85 to-transparent" />
                 </div>
               </div>
 

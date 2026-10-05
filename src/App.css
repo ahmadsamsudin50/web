@@ -38,21 +38,22 @@
   transform: rotateY(180deg);
 }
 
-/* Scrollbar Minimalis untuk Modal & Daftar Prestasi */
+/* Scrollbar Invisible untuk Modal & Daftar Prestasi */
+.custom-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
 .custom-scrollbar::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 .custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
+  display: none;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.35);
-  border-radius: 9999px;
-}
-
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.6);
+  display: none;
 }

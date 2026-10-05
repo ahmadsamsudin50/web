@@ -94,12 +94,12 @@ export default function ManualEntry() {
         .eq("is_active", true)
         .order("created_at", { ascending: false });
 
-      // Ambil enrollment yang berstatus 'active' atau 'completed' agar absensi yang baru saja lulus tetap bisa dikoreksi
+      // Ambil enrollment beserta kolom start_date dan created_at
       const { data: std, error: stdError } = await supabase
         .from("students")
         .select(`
           id, nis, users(full_name),
-          student_enrollments(id, class_id, status, classes(name, max_sessions))
+          student_enrollments(id, class_id, status, start_date, created_at, classes(name, max_sessions))
         `)
         .order("nis");
 
@@ -169,12 +169,19 @@ export default function ManualEntry() {
 
   if (activeSessionData) {
     if (attendeeType === "student") {
+      const sessionTime = new Date(activeSessionData.session_date).getTime();
+
       students.forEach((std) => {
-        // Tampilkan enrollment yang aktif di sesi ini, ATAU enrollment berstatus 'completed' yang sudah memiliki catatan log pada sesi ini (agar bisa dikoreksi statusnya)
+        // Tampilkan enrollment yang aktif di sesi ini (dan start_date <= tanggal sesi), 
+        // ATAU enrollment berstatus 'completed' yang sudah memiliki catatan log pada sesi ini
         const matchingEnrollments = std.student_enrollments?.filter((e) => {
           const isClassInSession = activeSessionData.class_ids?.includes(e.class_id);
           if (!isClassInSession) return false;
-          if (e.status === "active") return true;
+
+          const startTime = new Date(e.start_date || e.created_at).getTime();
+          const isStarted = startTime <= sessionTime;
+
+          if (e.status === "active" && isStarted) return true;
           if (e.status === "completed" && existingLogsMap[`${std.id}_${e.id}`]) return true;
           return false;
         }) || [];

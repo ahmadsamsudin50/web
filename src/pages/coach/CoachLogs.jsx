@@ -144,6 +144,25 @@ export default function CoachLogs() {
   if (loading) {
     return (
       <div className="min-h-[70vh] flex flex-col items-center justify-center font-sans">
+        <style>{`
+          html, body, #root {
+            overflow-x: hidden !important;
+          }
+
+          html, body, #root, * {
+            -ms-overflow-style: none !important;
+            scrollbar-width: none !important;
+          }
+
+          html::-webkit-scrollbar,
+          body::-webkit-scrollbar,
+          #root::-webkit-scrollbar,
+          *::-webkit-scrollbar {
+            display: none !important;
+            width: 0px !important;
+            height: 0px !important;
+          }
+        `}</style>
         <div className="w-10 h-10 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-3"></div>
         <p className="text-slate-500 text-sm font-medium animate-pulse">Memuat log kehadiran...</p>
       </div>
@@ -152,6 +171,25 @@ export default function CoachLogs() {
 
   return (
     <div className="min-h-screen bg-[#f8fafc] p-4 md:p-8 font-sans">
+      <style>{`
+        html, body, #root {
+          overflow-x: hidden !important;
+        }
+
+        html, body, #root, * {
+          -ms-overflow-style: none !important;
+          scrollbar-width: none !important;
+        }
+
+        html::-webkit-scrollbar,
+        body::-webkit-scrollbar,
+        #root::-webkit-scrollbar,
+        *::-webkit-scrollbar {
+          display: none !important;
+          width: 0px !important;
+          height: 0px !important;
+        }
+      `}</style>
       <Toaster position="top-right" />
       <div className="max-w-7xl mx-auto mb-6">
         <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight flex items-center gap-3">
@@ -224,7 +262,7 @@ export default function CoachLogs() {
           { label: "Hadir", value: totalPresentOnly, color: "text-emerald-600", bg: "bg-emerald-50/60" },
           { label: "Izin", value: totalExcused, color: "text-blue-600", bg: "bg-blue-50/60" },
           { label: "Sakit", value: totalSick, color: "text-amber-600", bg: "bg-amber-50/60" },
-          { label: "Alpa (Terhitung)", value: totalAbsent, color: "text-rose-600", bg: "bg-rose-50/60" },
+          { label: "Alpa", value: totalAbsent, color: "text-rose-600", bg: "bg-rose-50/60" },
         ].map((card) => (
           <div key={card.label} className={`rounded-2xl p-4 border border-slate-200 shadow-sm ${card.bg}`}>
             <div className={`text-2xl font-black ${card.color}`}>{card.value}</div>

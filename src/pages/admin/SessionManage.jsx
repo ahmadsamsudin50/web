@@ -116,6 +116,7 @@ export default function SessionManage() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
+  const [filterAttendanceStatus, setFilterAttendanceStatus] = useState("all");
   const [sortOrder, setSortOrder] = useState("desc");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -180,26 +181,32 @@ export default function SessionManage() {
 
       const alpaLogs = [];
       const nowIso = new Date().toISOString();
+      const sessionTime = new Date(session.session_date).getTime();
 
-      // 2. Tandai murid aktif yang belum absen
+      // 2. Tandai murid aktif yang belum absen (Hanya jika start_date <= tanggal sesi)
       if (session.class_ids && session.class_ids.length > 0) {
         const { data: enrollments } = await supabase
           .from("student_enrollments")
-          .select("id, student_id")
+          .select("id, student_id, start_date, created_at")
           .in("class_id", session.class_ids)
           .eq("status", "active");
 
         if (enrollments && enrollments.length > 0) {
           enrollments.forEach((enr) => {
-            if (enr.student_id && !attendedStudentIds.has(enr.student_id)) {
-              alpaLogs.push({
-                session_id: session.id,
-                student_id: enr.student_id,
-                enrollment_id: enr.id,
-                status: "alpa",
-                scanned_at: nowIso,
-              });
-              attendedStudentIds.add(enr.student_id);
+            const startTime = new Date(enr.start_date || enr.created_at).getTime();
+
+            // Hanya tandai ALPA jika sesi dilakukan pada/setelah tanggal aktif murid
+            if (!isNaN(startTime) && startTime <= sessionTime) {
+              if (enr.student_id && !attendedStudentIds.has(enr.student_id)) {
+                alpaLogs.push({
+                  session_id: session.id,
+                  student_id: enr.student_id,
+                  enrollment_id: enr.id,
+                  status: "alpa",
+                  scanned_at: nowIso,
+                });
+                attendedStudentIds.add(enr.student_id);
+              }
             }
           });
         }
@@ -323,7 +330,7 @@ export default function SessionManage() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, filterStatus, sortOrder, dateFrom, dateTo]);
+  }, [searchQuery, filterStatus, filterAttendanceStatus, sortOrder, dateFrom, dateTo]);
 
   const filteredSessions = sessions
     .filter((s) => {
@@ -336,13 +343,40 @@ export default function SessionManage() {
           : filterStatus === "active"
             ? s.is_active === true
             : s.is_active === false;
+
+      // Logika Penyaringan Berdasarkan Kehadiran (Sama dengan kriteria di Pop-Up)
+      let matchAttendance = true;
+      if (filterAttendanceStatus !== "all") {
+        const counts = s.status_counts || {
+          hadir_qr: 0,
+          hadir_manual: 0,
+          izin: 0,
+          sakit: 0,
+          alpa: 0,
+        };
+        const totalHadir = (counts.hadir_qr || 0) + (counts.hadir_manual || 0);
+
+        if (filterAttendanceStatus === "hadir") {
+          matchAttendance = totalHadir > 0;
+        } else if (filterAttendanceStatus === "izin") {
+          matchAttendance = (counts.izin || 0) > 0;
+        } else if (filterAttendanceStatus === "sakit") {
+          matchAttendance = (counts.sakit || 0) > 0;
+        } else if (filterAttendanceStatus === "alpa") {
+          matchAttendance = (counts.alpa || 0) > 0;
+        } else if (filterAttendanceStatus === "belum_absen") {
+          // Kriteria belum absen: gerbang masih terbuka atau belum ada catatan log lengkap
+          matchAttendance = s.is_active || totalHadir === 0;
+        }
+      }
+
       const matchFrom = dateFrom
         ? new Date(s.session_date) >= new Date(dateFrom)
         : true;
       const matchTo = dateTo
         ? new Date(s.session_date) <= new Date(dateTo + "T23:59:59")
         : true;
-      return matchSearch && matchStatus && matchFrom && matchTo;
+      return matchSearch && matchStatus && matchAttendance && matchFrom && matchTo;
     })
     .sort((a, b) => {
       const da = new Date(a.session_date).getTime();
@@ -357,11 +391,16 @@ export default function SessionManage() {
   );
 
   const hasActiveFilters =
-    searchQuery || filterStatus !== "all" || dateFrom || dateTo;
+    searchQuery ||
+    filterStatus !== "all" ||
+    filterAttendanceStatus !== "all" ||
+    dateFrom ||
+    dateTo;
 
   const clearFilters = () => {
     setSearchQuery("");
     setFilterStatus("all");
+    setFilterAttendanceStatus("all");
     setDateFrom("");
     setDateTo("");
   };
@@ -404,27 +443,62 @@ export default function SessionManage() {
       if (s.class_ids && s.class_ids.length > 0) {
         let enrollQuery = await supabase
           .from("student_enrollments")
-          .select("id, student_id, class_id, classes(name, category, max_sessions), students(id, nis, avatar_url, users(full_name))")
+          .select(`
+            id,
+            student_id,
+            class_id,
+            start_date,
+            created_at,
+            classes ( name, category, max_sessions ),
+            students (
+              id,
+              nis,
+              avatar_url,
+              users ( full_name, email )
+            )
+          `)
           .in("class_id", s.class_ids)
           .eq("status", "active");
 
         if (enrollQuery.error) {
           enrollQuery = await supabase
             .from("student_enrollments")
-            .select("id, student_id, class_id, classes(name, category, max_sessions), students(id, nis, users(full_name))")
+            .select(`
+              id,
+              student_id,
+              class_id,
+              start_date,
+              created_at,
+              classes ( name, category, max_sessions ),
+              students (
+                id,
+                nis,
+                users ( full_name, email )
+              )
+            `)
             .in("class_id", s.class_ids)
             .eq("status", "active");
         }
 
         if (enrollQuery.data) {
+          const sessionTime = new Date(s.session_date).getTime();
+
           expectedStudents = enrollQuery.data
-            .filter((e) => e.students)
+            .filter((e) => {
+              if (!e.students) return false;
+              
+              const rawDate = e.start_date || e.created_at;
+              if (!rawDate) return true;
+
+              const startTime = new Date(rawDate).getTime();
+              return isNaN(startTime) ? true : startTime <= sessionTime;
+            })
             .map((e) => ({
               id: e.students.id,
               enrollment_id: e.id,
               nis: e.students.nis,
               avatar_url: e.students.avatar_url || null,
-              users: e.students.users,
+              users: Array.isArray(e.students.users) ? e.students.users[0] : e.students.users,
               classes: e.classes,
             }));
         }
@@ -434,7 +508,7 @@ export default function SessionManage() {
       if (s.coach_ids && s.coach_ids.length > 0) {
         const { data: coachData } = await supabase
           .from("coaches")
-          .select("id, users(full_name)")
+          .select("id, photo_url, users(full_name)")
           .in("id", s.coach_ids);
         if (coachData) expectedCoaches = coachData;
       }
@@ -613,6 +687,19 @@ export default function SessionManage() {
 
   return (
     <div className="min-h-screen bg-[#f8fafc] p-4 md:p-8 font-sans relative">
+      {/* Styling Invisible Scrollbar (Menyembunyikan scrollbar tanpa menghilangkan fungsi scroll) */}
+      <style>{`
+        ::-webkit-scrollbar {
+          display: none !important;
+          width: 0px !important;
+          height: 0px !important;
+        }
+        * {
+          -ms-overflow-style: none !important;
+          scrollbar-width: none !important;
+        }
+      `}</style>
+
       <Toaster
         position="top-right"
         toastOptions={{ style: { borderRadius: "16px", fontWeight: "500" } }}
@@ -687,7 +774,7 @@ export default function SessionManage() {
             />
           </div>
 
-          <div className="relative flex-shrink-0 sm:w-48">
+          <div className="relative flex-shrink-0 sm:w-44">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
               <Filter size={15} className="text-slate-400" />
             </div>
@@ -696,9 +783,27 @@ export default function SessionManage() {
               onChange={(e) => setFilterStatus(e.target.value)}
               className="w-full pl-9 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all cursor-pointer font-medium text-slate-600"
             >
-              <option value="all">Semua Status</option>
+              <option value="all">Status Gerbang</option>
               <option value="active">Sesi Aktif</option>
               <option value="closed">Sesi Ditutup</option>
+            </select>
+          </div>
+
+          <div className="relative flex-shrink-0 sm:w-48">
+            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <Users size={15} className="text-slate-400" />
+            </div>
+            <select
+              value={filterAttendanceStatus}
+              onChange={(e) => setFilterAttendanceStatus(e.target.value)}
+              className="w-full pl-9 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all cursor-pointer font-medium text-slate-600"
+            >
+              <option value="all">Semua Presensi</option>
+              <option value="hadir">Ada Hadir</option>
+              <option value="izin">Ada Izin</option>
+              <option value="sakit">Ada Sakit</option>
+              <option value="alpa">Ada Alpa</option>
+              <option value="belum_absen">Belum Absen</option>
             </select>
           </div>
 
@@ -934,8 +1039,8 @@ export default function SessionManage() {
 
       {/* Modal Detail Presensi */}
       {isDetailModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-8 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-full animate-in zoom-in-95 duration-200">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-8 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-7xl overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-200">
             <div className="px-8 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 flex-shrink-0">
               <div className="flex items-center gap-3 text-indigo-600">
                 <Eye size={24} />
@@ -964,33 +1069,33 @@ export default function SessionManage() {
                         <Users size={16} className="text-blue-500" /> Presensi Atlet
                       </h4>
                       <div className="flex flex-wrap gap-1.5 text-[11px]">
-                        <span className="px-2 py-0.5 rounded font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                        <span className="px-2.5 py-1 rounded-lg font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300">
                           Hadir: {modalStudentCounts.hadir}
                         </span>
-                        <span className="px-2 py-0.5 rounded font-extrabold bg-blue-100 text-blue-800 border border-blue-300">
+                        <span className="px-2.5 py-1 rounded-lg font-extrabold bg-blue-100 text-blue-800 border border-blue-300">
                           Izin: {modalStudentCounts.izin}
                         </span>
-                        <span className="px-2 py-0.5 rounded font-extrabold bg-amber-100 text-amber-900 border border-amber-300">
+                        <span className="px-2.5 py-1 rounded-lg font-extrabold bg-amber-100 text-amber-900 border border-amber-300">
                           Sakit: {modalStudentCounts.sakit}
                         </span>
-                        <span className="px-2 py-0.5 rounded font-extrabold bg-rose-100 text-rose-800 border border-rose-300">
+                        <span className="px-2.5 py-1 rounded-lg font-extrabold bg-rose-100 text-rose-800 border border-rose-300">
                           Alpa: {modalStudentCounts.alpa}
                         </span>
-                        <span className="px-2 py-0.5 rounded font-extrabold bg-slate-200 text-slate-700 border border-slate-300">
+                        <span className="px-2.5 py-1 rounded-lg font-extrabold bg-slate-200 text-slate-700 border border-slate-300">
                           Belum Absen: {modalStudentCounts.belum_absen}
                         </span>
                       </div>
                     </div>
                     <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
-                      {/* Penambahan overflow-x-auto untuk mendukung scroll horizontal pada mobile */}
                       <div className="overflow-x-auto">
-                        <table className="w-full text-left text-sm min-w-[550px]">
+                        <table className="w-full text-left text-sm min-w-[700px]">
                           <thead className="bg-slate-50 border-b border-slate-100">
                             <tr>
-                              <th className="px-4 py-3 font-bold text-slate-500">Nama Atlet</th>
-                              <th className="px-4 py-3 font-bold text-slate-500">Kelas & Kategori</th>
-                              <th className="px-4 py-3 font-bold text-slate-500 text-center">Waktu</th>
-                              <th className="px-4 py-3 font-bold text-slate-500 text-right">Status</th>
+                              <th className="px-4 py-3.5 font-bold text-slate-500 text-center w-14">No.</th>
+                              <th className="px-6 py-3.5 font-bold text-slate-500">Nama Atlet</th>
+                              <th className="px-6 py-3.5 font-bold text-slate-500">Kelas & Kategori</th>
+                              <th className="px-6 py-3.5 font-bold text-slate-500 text-center">Waktu</th>
+                              <th className="px-6 py-3.5 font-bold text-slate-500 text-right">Status</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
@@ -1000,7 +1105,10 @@ export default function SessionManage() {
 
                               return (
                                 <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                                  <td className="px-4 py-3 font-medium text-slate-800">
+                                  <td className="px-4 py-3.5 text-center font-mono font-bold text-slate-400">
+                                    {idx + 1}
+                                  </td>
+                                  <td className="px-6 py-3.5 font-medium text-slate-800">
                                     <div className="flex items-center gap-3">
                                       <div
                                         onClick={() => {
@@ -1037,7 +1145,7 @@ export default function SessionManage() {
                                       </div>
                                     </div>
                                   </td>
-                                  <td className="px-4 py-3 text-slate-600 font-medium">
+                                  <td className="px-6 py-3.5 text-slate-600 font-medium">
                                     <div className="flex items-center gap-1.5 whitespace-nowrap">
                                       <span>{std.classes?.name}</span>
                                       <span
@@ -1049,10 +1157,10 @@ export default function SessionManage() {
                                       </span>
                                     </div>
                                   </td>
-                                  <td className="px-4 py-3 text-center text-slate-500 font-medium font-mono text-xs whitespace-nowrap">
+                                  <td className="px-6 py-3.5 text-center text-slate-500 font-medium font-mono text-xs whitespace-nowrap">
                                     {formatTimeOnly(std.scanned_at)}
                                   </td>
-                                  <td className="px-4 py-3 text-right whitespace-nowrap">
+                                  <td className="px-6 py-3.5 text-right whitespace-nowrap">
                                     <span
                                       className={`inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border ${getStatusBadgeStyle(
                                         std.status,
@@ -1067,8 +1175,8 @@ export default function SessionManage() {
                             {sessionDetails.students.length === 0 && (
                               <tr>
                                 <td
-                                  colSpan="4"
-                                  className="px-4 py-8 text-center text-slate-400 font-medium"
+                                  colSpan="5"
+                                  className="px-6 py-8 text-center text-slate-400 font-medium"
                                 >
                                   Tidak ada atlet aktif yang terdaftar di kelas sesi ini.
                                 </td>
@@ -1085,41 +1193,77 @@ export default function SessionManage() {
                       <UserCheck size={16} className="text-indigo-500" /> Presensi Pelatih
                     </h4>
                     <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
-                      {/* Penambahan overflow-x-auto untuk mendukung scroll horizontal pada mobile */}
                       <div className="overflow-x-auto">
-                        <table className="w-full text-left text-sm min-w-[500px]">
+                        <table className="w-full text-left text-sm min-w-[700px]">
                           <thead className="bg-slate-50 border-b border-slate-100">
                             <tr>
-                              <th className="px-4 py-3 font-bold text-slate-500">Nama Pelatih</th>
-                              <th className="px-4 py-3 font-bold text-slate-500 text-center">Waktu</th>
-                              <th className="px-4 py-3 font-bold text-slate-500 text-right">Status</th>
+                              <th className="px-4 py-3.5 font-bold text-slate-500 text-center w-14">No.</th>
+                              <th className="px-6 py-3.5 font-bold text-slate-500">Foto</th>
+                              <th className="px-6 py-3.5 font-bold text-slate-500">Nama Pelatih</th>
+                              <th className="px-6 py-3.5 font-bold text-slate-500 text-center">Waktu</th>
+                              <th className="px-6 py-3.5 font-bold text-slate-500 text-right">Status</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
-                            {sessionDetails.coaches.map((coach) => (
-                              <tr key={coach.id} className="hover:bg-slate-50 transition-colors">
-                                <td className="px-4 py-3 font-medium text-slate-800 whitespace-nowrap">
-                                  {coach.users?.full_name}
-                                </td>
-                                <td className="px-4 py-3 text-center text-slate-500 font-medium font-mono text-xs whitespace-nowrap">
-                                  {formatTimeOnly(coach.scanned_at)}
-                                </td>
-                                <td className="px-4 py-3 text-right whitespace-nowrap">
-                                  <span
-                                    className={`inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border ${getStatusBadgeStyle(
-                                      coach.status,
-                                    )}`}
-                                  >
-                                    {coach.status.replace("_", " ")}
-                                  </span>
-                                </td>
-                              </tr>
-                            ))}
+                            {sessionDetails.coaches.map((coach, idx) => {
+                              const coachPhoto = coach.photo_url || coach.users?.photo_url;
+                              const coachName = coach.users?.full_name || "Tanpa Nama";
+
+                              return (
+                                <tr key={coach.id} className="hover:bg-slate-50 transition-colors">
+                                  <td className="px-4 py-3.5 text-center font-mono font-bold text-slate-400">
+                                    {idx + 1}
+                                  </td>
+                                  <td className="px-6 py-3.5">
+                                    <div
+                                      onClick={() => {
+                                        if (coachPhoto) {
+                                          setImagePreviewModal({
+                                            isOpen: true,
+                                            url: coachPhoto,
+                                            name: coachName,
+                                          });
+                                        }
+                                      }}
+                                      className={`w-10 h-10 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center overflow-hidden shrink-0 ${
+                                        coachPhoto ? "cursor-pointer hover:opacity-85 transition-opacity" : ""
+                                      }`}
+                                      title={coachPhoto ? "Klik untuk memperbesar foto" : undefined}
+                                    >
+                                      {coachPhoto ? (
+                                        <img
+                                          src={coachPhoto}
+                                          alt={coachName}
+                                          className="w-full h-full object-cover"
+                                        />
+                                      ) : (
+                                        <User size={18} className="text-slate-400" />
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className="px-6 py-3.5 font-medium text-slate-800 whitespace-nowrap">
+                                    {coachName}
+                                  </td>
+                                  <td className="px-6 py-3.5 text-center text-slate-500 font-medium font-mono text-xs whitespace-nowrap">
+                                    {formatTimeOnly(coach.scanned_at)}
+                                  </td>
+                                  <td className="px-6 py-3.5 text-right whitespace-nowrap">
+                                    <span
+                                      className={`inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border ${getStatusBadgeStyle(
+                                        coach.status,
+                                      )}`}
+                                    >
+                                      {coach.status.replace("_", " ")}
+                                    </span>
+                                  </td>
+                                </tr>
+                              );
+                            })}
                             {sessionDetails.coaches.length === 0 && (
                               <tr>
                                 <td
-                                  colSpan="3"
-                                  className="px-4 py-8 text-center text-slate-400 font-medium"
+                                  colSpan="5"
+                                  className="px-6 py-8 text-center text-slate-400 font-medium"
                                 >
                                   Tidak ada pelatih yang ditugaskan ke sesi ini.
                                 </td>
@@ -1148,7 +1292,7 @@ export default function SessionManage() {
       {/* Modal Tambah / Edit Sesi */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-8 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-full animate-in zoom-in-95 duration-200">
+          <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-200">
             <div className="px-8 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 flex-shrink-0">
               <div className="flex items-center gap-3 text-blue-600">
                 {isEditing ? <Edit2 size={24} /> : <CalendarDays size={24} />}
@@ -1165,7 +1309,7 @@ export default function SessionManage() {
             </div>
             <form onSubmit={handleSubmit} className="flex flex-col overflow-hidden flex-1">
               <div className="p-8 overflow-y-auto space-y-6 custom-scrollbar">
-                <div className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">
                       Nama Sesi
@@ -1200,7 +1344,7 @@ export default function SessionManage() {
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
                       <Layers size={14} className="text-blue-500" /> Kelas yang Ditugaskan
                     </label>
-                    <div className="grid grid-cols-1 gap-2.5 p-4 border border-slate-100 bg-slate-50 rounded-2xl max-h-48 overflow-y-auto custom-scrollbar">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 p-4 border border-slate-100 bg-slate-50 rounded-2xl max-h-52 overflow-y-auto custom-scrollbar">
                       {classes.map((c) => {
                         const isChecked = form.class_ids.includes(c.id);
                         return (
@@ -1232,7 +1376,7 @@ export default function SessionManage() {
                         );
                       })}
                       {classes.length === 0 && (
-                        <span className="text-xs text-slate-400">
+                        <span className="text-xs text-slate-400 col-span-2">
                           Tidak ada kelas yang tersedia.
                         </span>
                       )}
@@ -1243,7 +1387,7 @@ export default function SessionManage() {
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
                       <UserCheck size={14} className="text-indigo-500" /> Pelatih yang Ditugaskan
                     </label>
-                    <div className="grid grid-cols-1 gap-2 p-4 border border-slate-100 bg-slate-50 rounded-2xl max-h-40 overflow-y-auto custom-scrollbar">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-4 border border-slate-100 bg-slate-50 rounded-2xl max-h-44 overflow-y-auto custom-scrollbar">
                       {coaches.map((c) => {
                         const isChecked = form.coach_ids.includes(c.id);
                         return (
@@ -1266,7 +1410,7 @@ export default function SessionManage() {
                         );
                       })}
                       {coaches.length === 0 && (
-                        <span className="text-xs text-slate-400">
+                        <span className="text-xs text-slate-400 col-span-2">
                           Tidak ada pelatih yang tersedia.
                         </span>
                       )}

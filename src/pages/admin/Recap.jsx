@@ -131,9 +131,9 @@ export default function Recap() {
             id, status, scanned_at, enrollment_id, student_id,
             students (
               id, nis, users ( full_name ),
-              student_enrollments ( id, status, class_id )
+              student_enrollments ( id, status, class_id, start_date, created_at, classes ( name ) )
             ),
-            student_enrollments ( id, class_id, status, classes ( name ) ),
+            student_enrollments ( id, class_id, status, start_date, created_at, classes ( name ) ),
             sessions ( name, session_date )
           `)
           .not("student_id", "is", null)
@@ -201,8 +201,28 @@ export default function Recap() {
 
   let processedLogs = [...logs];
 
-  if (attendeeType === "student" && studentScope === "completed_only") {
-    processedLogs = processedLogs.filter((log) => isStudentCompletedAll(log));
+  if (attendeeType === "student") {
+    // Normalisasi perbandingan tanggal tanpa mempedulikan jam/menit
+    processedLogs = processedLogs.filter((log) => {
+      const sessionDateObj = log.sessions?.session_date
+        ? new Date(log.sessions.session_date)
+        : new Date(log.scanned_at);
+
+      const enrollment = log.student_enrollments || (log.students?.student_enrollments && log.students.student_enrollments[0]);
+      if (!enrollment) return true;
+
+      const startDateObj = new Date(enrollment.start_date || enrollment.created_at);
+
+      // Set ke 00:00:00 agar perbandingan tanggal adil
+      sessionDateObj.setHours(0, 0, 0, 0);
+      startDateObj.setHours(0, 0, 0, 0);
+
+      return sessionDateObj.getTime() >= startDateObj.getTime();
+    });
+
+    if (studentScope === "completed_only") {
+      processedLogs = processedLogs.filter((log) => isStudentCompletedAll(log));
+    }
   }
 
   if (attendeeType === "coach" && filterCoach !== "all") {
@@ -215,11 +235,12 @@ export default function Recap() {
     const query = searchQuery.toLowerCase();
     processedLogs = processedLogs.filter((log) => {
       if (attendeeType === "student") {
+        const className = log.student_enrollments?.classes?.name || log.students?.student_enrollments?.[0]?.classes?.name || "";
         return (
           log.students?.nis?.toLowerCase().includes(query) ||
           log.students?.users?.full_name?.toLowerCase().includes(query) ||
           log.sessions?.name?.toLowerCase().includes(query) ||
-          log.student_enrollments?.classes?.name?.toLowerCase().includes(query)
+          className.toLowerCase().includes(query)
         );
       } else {
         return (
@@ -236,9 +257,10 @@ export default function Recap() {
   }
 
   if (attendeeType === "student" && filterClass !== "all") {
-    processedLogs = processedLogs.filter(
-      (log) => log.student_enrollments?.class_id === filterClass
-    );
+    processedLogs = processedLogs.filter((log) => {
+      const classId = log.student_enrollments?.class_id || log.students?.student_enrollments?.[0]?.class_id;
+      return classId === filterClass;
+    });
   }
 
   if (dateFrom && dateFrom.trim() !== "") {
@@ -334,6 +356,7 @@ export default function Recap() {
         const s = (log.status || "").toLowerCase();
         const isQuotaCounted = s.includes("hadir") || s === "alpa";
         const quotaInfo = isQuotaCounted ? "Memotong Kuota Sesi" : "Dikecualikan (Tidak Memotong)";
+        const className = log.student_enrollments?.classes?.name || log.students?.student_enrollments?.[0]?.classes?.name || "-";
 
         if (attendeeType === "student") {
           return {
@@ -342,7 +365,7 @@ export default function Recap() {
             "Waktu": dateObj.toLocaleTimeString("id-ID"),
             "NIS": log.students?.nis || "-",
             "Nama Atlet": log.students?.users?.full_name || "Tidak diketahui",
-            "Kelas": log.student_enrollments?.classes?.name || "-",
+            "Kelas": className,
             "Sesi Latihan": log.sessions?.name || "-",
             "Status Kehadiran": getStatusLabel(log.status),
             "Pengaruh Sesi": quotaInfo,
@@ -416,6 +439,19 @@ export default function Recap() {
 
   return (
     <div className="min-h-screen bg-[#f8fafc] p-4 md:p-8 font-sans">
+      {/* CSS untuk Menyembunyikan Seluruh Scrollbar Tanpa Menghilangkan Fungsi Scroll */}
+      <style>{`
+        ::-webkit-scrollbar {
+          display: none !important;
+          width: 0px !important;
+          height: 0px !important;
+        }
+        * {
+          -ms-overflow-style: none !important;
+          scrollbar-width: none !important;
+        }
+      `}</style>
+
       <Toaster position="top-right" />
       <CustomConfirmModal
         isOpen={confirmState.isOpen}
@@ -638,6 +674,7 @@ export default function Recap() {
                 const timeStr = scanDate.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
                 const isCompleted = attendeeType === "student" && isStudentCompletedAll(log);
                 const isAlpa = log.status === "alpa";
+                const className = log.student_enrollments?.classes?.name || log.students?.student_enrollments?.[0]?.classes?.name || "-";
 
                 return (
                   <tr key={log.id} className="hover:bg-slate-50/50">
@@ -670,7 +707,7 @@ export default function Recap() {
                     <td className="px-6 py-4">
                       <div className="font-semibold text-slate-700">{log.sessions?.name || "-"}</div>
                       {attendeeType === "student" && (
-                        <div className="text-[11px] text-blue-600 font-medium">{log.student_enrollments?.classes?.name || "-"}</div>
+                        <div className="text-[11px] text-blue-600 font-medium">{className}</div>
                       )}
                     </td>
                     <td className="px-6 py-4 text-center">
@@ -680,7 +717,7 @@ export default function Recap() {
                         </span>
                         {isAlpa && (
                           <span className="text-[9px] font-bold text-rose-600">
-                            (Potong Sesi)
+                            
                           </span>
                         )}
                       </div>
@@ -714,6 +751,7 @@ export default function Recap() {
             const timeStr = scanDate.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
             const isCompleted = attendeeType === "student" && isStudentCompletedAll(log);
             const isAlpa = log.status === "alpa";
+            const className = log.student_enrollments?.classes?.name || log.students?.student_enrollments?.[0]?.classes?.name || "-";
 
             return (
               <div key={log.id} className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-2">
@@ -748,7 +786,7 @@ export default function Recap() {
                   </div>
                 </div>
                 <div className="flex justify-between items-center text-[11px] text-slate-400 pt-1 border-t border-slate-100">
-                  <span>{attendeeType === "student" ? log.student_enrollments?.classes?.name : log.coaches?.specialty}</span>
+                  <span>{attendeeType === "student" ? className : log.coaches?.specialty}</span>
                   <div className="flex items-center gap-2">
                     <span>{dateStr} • {timeStr} WIB</span>
                     {attendeeType === "student" && studentScope === "completed_only" && (
